@@ -1,0 +1,38 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "test:render": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/render.js",
+    "test:recommend": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/recommend.js",
+    "test:live": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/live.js",
+    "check:artists": "node scripts/check-artists.mjs",
+    "check:artist-images": "node scripts/check-artist-images.mjs",
+    "probe:artist-page": "node scripts/probe-artist-page.mjs",
+    "test": "npm run test:render && npm run test:recommend",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.20.0",
+    "howler": "^2.2.4",
+    "lucide-react": "^1.48.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.6.1",
+    "oxlint": "^1.81.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0"
+  }
+}

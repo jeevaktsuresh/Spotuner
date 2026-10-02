@@ -1,0 +1,89 @@
+{
+  // Wrangler configuration for the Spotuner API Worker.
+  //
+  // Secrets are NOT declared here — `SPOTIFY_CLIENT_SECRET` and friends are set
+  // with `wrangler secret put`, which stores them encrypted and injects them as
+  // runtime bindings. Plain-text values belong under `vars` only when they are
+  // genuinely public configuration.
+  //
+  //   npx wrangler kv namespace create CACHE
+  //   npx wrangler kv namespace create ARTIST_IMAGES
+  //   npx wrangler secret put SPOTIFY_CLIENT_ID
+  //   npx wrangler secret put SPOTIFY_CLIENT_SECRET
+  //   npm run deploy
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spotuner-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+
+  // `nodejs_compat` supplies Buffer and the ESM/Node builtins the shared `lib/`
+  // modules use (Buffer in the image prober, base64 in the Spotify client, dynamic
+  // `node:*` imports in the Node-only yt-dlp fallback).
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Discovery is a multi-second, many-request pipeline: hydrating 90 videos,
+  // enriching, then building editorial shelves that fan out into dozens of YouTube
+  // searches. The default 30s CPU ceiling is not enough headroom for a cold run, so
+  // the paid-plan limit is requested explicitly. A cold `/api/shelves` still costs
+  // far more than 50 subrequests, which means the paid plan is a requirement, not
+  // an optimisation.
+  "limits": {
+    "cpu_ms": 300000
+  },
+
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "YOUR_CACHE_KV_NAMESPACE_ID",
+      "preview_id": "YOUR_CACHE_KV_PREVIEW_NAMESPACE_ID"
+    },
+    {
+      "binding": "ARTIST_IMAGES",
+      "id": "YOUR_ARTIST_IMAGES_KV_NAMESPACE_ID",
+      "preview_id": "YOUR_ARTIST_IMAGES_KV_PREVIEW_NAMESPACE_ID"
+    }
+  ],
+
+  "vars": {
+    // Comma-separated allow-list for CORS. Development plus the production Vercel
+    // deployment; add preview origins rather than widening this to `*`.
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,https://spotuner.vercel.app",
+
+    // Discovery tuning. Every one of these preserves its original default; they
+    // are spelled out so a deployment can tune without reading the source.
+    "SPOTUNER_TTL_TRENDING_MS": "1200000",
+    "SPOTUNER_TTL_LATEST_MS": "2700000",
+    "SPOTUNER_TTL_CATALOG_MS": "21600000",
+    "SPOTUNER_STALE_GRACE_MS": "1800000",
+    "SPOTUNER_TRENDING_WINDOW_DAYS": "210",
+    "SPOTUNER_RELEASE_WINDOW_DAYS": "365",
+    "SPOTUNER_MIN_TRENDING_SCORE": "12",
+    "SPOTUNER_MIN_LATEST_SCORE": "18",
+    "SPOTUNER_REPETITION_WEIGHT": "1",
+    "SPOTUNER_HYDRATE_LIMIT": "90",
+    "SPOTUNER_META_CONCURRENCY": "8",
+
+    // Enrichment tuning. MusicBrainz is rate-limited to roughly one request per
+    // second, so ENRICH_LIMIT is the main control on cold-run duration.
+    "SPOTUNER_ENRICH_LIMIT": "24",
+    "SPOTUNER_MAX_ENRICHERS": "2",
+    "SPOTUNER_MB_INTERVAL_MS": "1050",
+
+    // Artist image lookup (iTunes). No key required.
+    "SPOTUNER_ITUNES_INTERVAL_MS": "110",
+    "SPOTUNER_ITUNES_BACKOFF_MS": "900000",
+
+    // How many recent artist-image keys a cold isolate pulls into memory. Every KV
+    // read is a subrequest against the 1000-per-invocation ceiling, so this is a
+    // subrequest budget rather than a cache size. Lower it on the free plan.
+    "SPOTUNER_ARTIST_PRIME_LIMIT": "250",
+
+    // Report as `production` for the language detector's default-off debug
+    // logging. The Worker runtime has no NODE_ENV of its own.
+    "SPOTUNER_LANGUAGE_DEBUG": "0"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

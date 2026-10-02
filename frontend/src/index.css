@@ -1,0 +1,253 @@
+@import 'tailwindcss';
+
+@theme {
+  /* ===== Accent — magenta/pink sampled from the reference =====
+     Drives play buttons, progress, active nav, and the "see all" hovers. */
+  --color-accent: #e75a9e;
+  --color-accent-hover: #f470ae;
+  --color-accent-soft: rgba(231, 90, 158, 0.13);
+  --color-accent-border: rgba(231, 90, 158, 0.34);
+  --color-accent-glow: rgba(231, 90, 158, 0.4);
+  --color-accent-magenta: #c026d3;
+  --color-accent-track: #3a1b30;
+
+  /* ===== Surfaces — near-black with a violet cast ===== */
+  --color-surface-base: #0a090c;
+  --color-surface-nav: #0d0b0f;
+  --color-surface-raised: #15121a;
+  --color-surface-2: #1c1822;
+  --color-surface-bar: rgba(14, 11, 17, 0.88);
+  --color-surface-panel: #100d13;
+
+  --color-divider: rgba(255, 255, 255, 0.07);
+  --color-divider-strong: rgba(255, 255, 255, 0.12);
+
+  /* ===== Type ===== */
+  --color-label-primary: #ffffff;
+  --color-label-secondary: #a09aa6;
+  --color-label-tertiary: rgba(255, 255, 255, 0.42);
+
+  --font-sans:
+    'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+
+  /* Wordmark */
+  --brand-icon-size: 32px;
+  --brand-text-size: 19px;
+  --brand-gap: 2px;
+  --brand-pad-x: 0px;
+
+  /* Motion */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-global: all 0.2s var(--ease-out-quint);
+
+  --radius-card: 14px;
+  --radius-tile: 10px;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-surface-base);
+    color: var(--color-label-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+
+  button {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    line-height: inherit;
+  }
+
+  ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  svg {
+    pointer-events: none;
+  }
+
+  /* Text-selection is disabled app-wide, but inputs opt back in */
+  input,
+  textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Respect reduced-motion: collapse every decorative transition rather than
+     trying to enumerate each animated component. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Vertical scroll container for the main region */
+  .scrollable {
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  /* Hide scrollbars on horizontal carousels */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hairline-t {
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .hairline-b {
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  /* Frosted chrome used by the header and the player bar */
+  .chrome-blur {
+    background: var(--color-surface-bar);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+  }
+
+  /* Line-clamp primitives */
+  .clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Card artwork: scales on hover, and the play control fades in beside it.
+     `.group` is the trigger, so both effects stay in sync on one element. */
+  .art-hover {
+    transition: transform 0.35s var(--ease-out-quint), box-shadow 0.35s var(--ease-out-quint);
+  }
+
+  .group:hover .art-hover {
+    transform: scale(1.03);
+  }
+
+  .play-reveal {
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+    transition: opacity 0.25s var(--ease-out-quint), transform 0.25s var(--ease-out-quint);
+  }
+
+  .group:hover .play-reveal,
+  .group:focus-within .play-reveal {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  /* Lift + accent glow for hero/ranked surfaces */
+  .glow-hover {
+    transition: box-shadow 0.35s var(--ease-out-quint), border-color 0.35s var(--ease-out-quint);
+  }
+
+  .group:hover .glow-hover {
+    box-shadow: 0 12px 40px -12px var(--color-accent-glow);
+    border-color: var(--color-accent-border);
+  }
+
+  /* Thin purple scrollbar for horizontal shelves */
+  .shelf-x {
+    overflow-x: auto;
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .t-global {
+    transition: var(--transition-global);
+  }
+
+  .no-drag {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  /* Horizontal shelf row: bleeds to the viewport edge on small screens so the
+     scroll affordance reads as a carousel rather than a clipped grid. */
+  .row-bleed {
+    margin-inline: -1rem;
+    padding-inline: 1rem;
+    scroll-padding-inline: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    .row-bleed {
+      margin-inline: -2rem;
+      padding-inline: 2rem;
+      scroll-padding-inline: 2rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .row-bleed {
+      margin-inline: -2.5rem;
+      padding-inline: 2.5rem;
+      scroll-padding-inline: 2.5rem;
+    }
+  }
+}
+
+/* Slim dark scrollbar to match the reference */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

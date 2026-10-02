@@ -1,0 +1,70 @@
+# Local development secrets for `wrangler dev`.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored by wrangler's default .gitignore rules and must never
+# be committed. In production the same values are set with
+# `wrangler secret put <NAME>`, which encrypts them; they are read from Worker
+# bindings, never from a file.
+
+# --- Secrets -----------------------------------------------------------------
+# Optional. Without them Spotify is simply unavailable: YouTube remains the search,
+# discovery and playback source and nothing degrades.
+#
+# These are server-side only. SPOTIFY_CLIENT_SECRET must not reach the browser, a
+# client bundle, an API response, or any storage the frontend can read.
+SPOTIFY_CLIENT_ID=your_spotify_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+
+# Optional. Activates the strongest language layer
+# (`snippet.defaultAudioLanguage`), which needs a Data API key. Detection runs
+# correctly without it, with one fewer input.
+# YOUTUBE_API_KEY=your_youtube_data_api_key
+
+# Optional. Inert unless set; a thin adapter for Bing / Google / SerpAPI-style
+# image search used as the last real candidate source by the hero image matcher.
+# HERO_IMAGE_SEARCH_URL=
+# HERO_IMAGE_SEARCH_KEY=
+
+# --- Configuration ------------------------------------------------------------
+# Comma-separated CORS allow-list. The Vite dev server is 5173; the production
+# frontend will be on Vercel.
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+
+# Set to `off` to disable an enricher without removing its credentials.
+# SPOTUNER_MUSICBRAINZ=off
+
+# Discovery tuning. The values below are the built-in defaults, listed so a local
+# run matches production rather than inheriting a different set of magic numbers.
+SPOTUNER_TTL_TRENDING_MS=1200000
+SPOTUNER_TTL_LATEST_MS=2700000
+SPOTUNER_TTL_CATALOG_MS=21600000
+SPOTUNER_STALE_GRACE_MS=1800000
+SPOTUNER_TRENDING_WINDOW_DAYS=210
+SPOTUNER_RELEASE_WINDOW_DAYS=365
+SPOTUNER_MIN_TRENDING_SCORE=12
+SPOTUNER_MIN_LATEST_SCORE=18
+SPOTUNER_REPETITION_WEIGHT=1
+SPOTUNER_HYDRATE_LIMIT=90
+SPOTUNER_META_CONCURRENCY=8
+
+# Enrichment tuning. MusicBrainz is rate-limited to roughly one request per second,
+# so ENRICH_LIMIT is the main control on how long a cold discovery run takes.
+SPOTUNER_ENRICH_LIMIT=24
+SPOTUNER_MAX_ENRICHERS=2
+SPOTUNER_MB_INTERVAL_MS=1050
+
+# Artist image lookup (iTunes). No key required.
+SPOTUNER_ITUNES_INTERVAL_MS=110
+SPOTUNER_ITUNES_BACKOFF_MS=900000
+
+# Stream URL cache ceiling. Cached entries are additionally capped by the URL's own
+# `expire` timestamp, so this is an upper bound rather than a promise of freshness.
+# SPOTUNER_STREAM_TTL_MS=21600000
+
+# Language detection cache TTL, in seconds (14 days).
+# LANGUAGE_CACHE_TTL=1209600
+
+# Verbose language classification. The Worker has no NODE_ENV, so set this to `1`
+# locally if you want the detector's per-track log lines.
+SPOTUNER_LANGUAGE_DEBUG=1

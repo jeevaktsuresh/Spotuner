@@ -1,0 +1,48 @@
+{
+  "name": "spotuner-backend",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "kv:create": "wrangler kv namespace create CACHE && wrangler kv namespace create ARTIST_IMAGES",
+    "secret:spotify-id": "wrangler secret put SPOTIFY_CLIENT_ID",
+    "secret:spotify-secret": "wrangler secret put SPOTIFY_CLIENT_SECRET",
+    "test:compat": "node scripts/test-worker-compat.mjs",
+    "typecheck": "tsc --noEmit",
+    "dev:node": "node server.js",
+    "check:hero": "node scripts/check-hero.mjs",
+    "test:discovery": "node scripts/test-discovery.mjs",
+    "test:metadata": "node scripts/test-metadata.mjs && node scripts/test-musicbrainz.mjs",
+    "test:scoring": "node scripts/test-scoring.mjs",
+    "test:failure": "node scripts/test-provider-failure.mjs",
+    "test:spotify": "node scripts/test-spotify.mjs",
+    "test:spotify-security": "node scripts/test-spotify-security.mjs",
+    "test:api": "node scripts/test-api-shape.mjs",
+    "check:discovery": "node scripts/check-trending-vs-latest.mjs",
+    "probe:metadata": "node scripts/probe-metadata.mjs",
+    "probe:providers": "node scripts/probe-providers.mjs",
+    "test": "node scripts/test-discovery.mjs && node scripts/test-metadata.mjs && node scripts/test-scoring.mjs && node scripts/test-provider-failure.mjs && node scripts/test-spotify.mjs"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "hono": "^4.13.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-cache": "^5.1.2",
+    "nodemon": "^3.0.2",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.27.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20261001.1": true
+  }
+}
