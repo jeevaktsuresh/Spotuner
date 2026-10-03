@@ -1,12 +1,15 @@
 ﻿/**
  * Live smoke check against the running backend.
  *
- * Confirms the recommender produces differentiated cards from real catalogue
- * data rather than only from fixtures. Run with the backend on port 3001.
+* Confirms the recommender produces differentiated cards from real catalogue
+ * data rather than only from fixtures. Backend origin defaults to
+ * http://localhost:3001; override with API_URL.
  */
 import { generateCards, fillColdStartCards } from '../src/recommend/index.js';
 
-const res = await fetch('http://localhost:3001/api/shelves?limit=8');
+const API = process.env.API_URL || 'http://localhost:3001';
+
+const res = await fetch(`${API}/api/shelves?limit=8`);
 const shelves = await res.json();
 console.log('shelves:', shelves.length, '| tracks:', shelves.reduce((n, s) => n + (s.tracks?.length ?? 0), 0));
 

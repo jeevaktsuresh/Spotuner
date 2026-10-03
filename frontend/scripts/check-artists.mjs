@@ -5,11 +5,15 @@
  * protect is: no two distinct performers collapse into one entry, and a performer
  * always lands on the same key regardless of which collaboration they appear in.
  *
- * Run: node scripts/check-artists.mjs (backend must be on :3001)
+ * Run: node scripts/check-artists.mjs
+ * Backend origin defaults to http://localhost:3001; override with API_URL to point
+ * the check at a deployed Worker.
  */
 import { artistsFromTracks, splitArtistCredit, artistKey, artistSlug } from '../src/utils/artists.js';
 
-const shelves = await (await fetch('http://localhost:3001/api/shelves?limit=10')).json();
+const API = process.env.API_URL || 'http://localhost:3001';
+
+const shelves = await (await fetch(`${API}/api/shelves?limit=10`)).json();
 const tracks = shelves.flatMap((s) => s.tracks ?? []);
 
 let pass = 0;

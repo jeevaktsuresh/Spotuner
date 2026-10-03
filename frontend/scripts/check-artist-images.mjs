@@ -7,10 +7,11 @@
  * load, since a plausible-looking URL is not proof of a working image.
  *
  * Run: node scripts/check-artist-images.mjs
+ * Backend origin defaults to http://localhost:3001; override with API_URL.
  */
 import { artistsFromTracks } from '../src/utils/artists.js';
 
-const API = 'http://localhost:3001';
+const API = process.env.API_URL || 'http://localhost:3001';
 
 const shelves = await (await fetch(`${API}/api/shelves?limit=10`)).json();
 const tracks = shelves.flatMap((s) => s.tracks ?? []);

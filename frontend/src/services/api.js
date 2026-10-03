@@ -1,7 +1,33 @@
 import axios from 'axios';
 
+/**
+ * Backend origin, supplied by the build environment.
+ *
+ * This is the only place the backend address is defined — every request in the app
+ * goes through one of the two clients below. It is never a hardcoded deployment
+ * URL: production sets `VITE_API_URL` in Vercel, and local development sets it in
+ * `frontend/.env` (see `.env.example`).
+ */
+const API_URL = import.meta.env.VITE_API_URL;
+
+/**
+ * Base URL that every API call resolves against.
+ *
+ * `VITE_API_URL` is the backend's *origin* (`http://localhost:3001`,
+ * `https://spotunerbackend.jeevak3358.workers.dev`), but the API itself is mounted
+ * under `/api`. Both spellings are therefore accepted, so either convention can be
+ * pasted into the environment without touching code: a trailing slash is stripped,
+ * and an existing `/api` suffix is not doubled up into `/api/api`.
+ *
+ * Every endpoint path below stays relative (`/shelves`, `/search/all`, `/play/...`)
+ * and is unchanged by this — it only decides the prefix they resolve against.
+ */
+const API_BASE = `${String(API_URL || 'http://localhost:3001')
+  .replace(/\/+$/, '')
+  .replace(/\/api$/, '')}/api`;
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
+  baseURL: API_BASE,
   timeout: 15000
 });
 
@@ -9,9 +35,11 @@ const api = axios.create({
 // budget than search or the first request of a session times out. Warm requests
 // return in well under a second because the backend serves from cache.
 const discoveryApi = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
+  baseURL: API_BASE,
   timeout: 60000
 });
+
+export { API_URL, API_BASE };
 
 /** Build the shared discovery query string. */
 function discoveryQuery({ scope, limit, exclude, maxPerArtist }) {

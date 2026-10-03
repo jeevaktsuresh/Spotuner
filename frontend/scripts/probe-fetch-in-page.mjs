@@ -16,7 +16,8 @@ import path from 'node:path';
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PORT = 9333;
 const PAGE = process.argv[2] || 'http://localhost:5173/artists';
-const TARGET = process.argv[3] || 'http://localhost:3001/api/shelves?limit=10';
+const API = process.env.API_URL || 'http://localhost:3001';
+const TARGET = process.argv[3] || `${API}/api/shelves?limit=10`;
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'spotuner-fetch-'));
 const chrome = spawn(CHROME, [
