@@ -1,20 +1,38 @@
 import axios from 'axios';
 
+/** Origin used by `npm run dev`, and only by `npm run dev`. */
+const DEV_API_ORIGIN = 'http://localhost:3001';
+
 /**
- * Backend origin, supplied by the build environment.
+ * Last-resort origin for a production build that has no `VITE_API_URL`.
  *
- * This is the only place the backend address is defined — every request in the app
- * goes through one of the two clients below. It is never a hardcoded deployment
- * URL: production sets `VITE_API_URL` in Vercel, and local development sets it in
- * `frontend/.env` (see `.env.example`).
+ * Production is expected to set `VITE_API_URL` in the Vercel project settings, and
+ * that value always wins. This exists for one specific failure mode: a production
+ * build with the variable unset would otherwise fall back to `localhost:3001` and
+ * ship a site that silently calls the visitor's own machine — every request fails,
+ * and because there is no server there to answer, the browser reports it as a CORS
+ * error with no obvious cause. Pointing at the real backend instead turns that into
+ * an ordinary network error, and the console.error below names the actual mistake.
  */
-const API_URL = import.meta.env.VITE_API_URL;
+const PROD_API_ORIGIN = 'https://spotuner-api.jeevak3358.workers.dev';
+
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+
+const API_URL =
+  configuredApiUrl || (import.meta.env.DEV ? DEV_API_ORIGIN : PROD_API_ORIGIN);
+
+if (!configuredApiUrl && !import.meta.env.DEV) {
+  console.error(
+    `[spotuner] VITE_API_URL is not set in this production build; falling back to ${PROD_API_ORIGIN}. ` +
+      'Set VITE_API_URL in the Vercel project settings.',
+  );
+}
 
 /**
  * Base URL that every API call resolves against.
  *
  * `VITE_API_URL` is the backend's *origin* (`http://localhost:3001`,
- * `https://spotunerbackend.jeevak3358.workers.dev`), but the API itself is mounted
+ * `https://spotuner-api.jeevak3358.workers.dev`), but the API itself is mounted
  * under `/api`. Both spellings are therefore accepted, so either convention can be
  * pasted into the environment without touching code: a trailing slash is stripped,
  * and an existing `/api` suffix is not doubled up into `/api/api`.
@@ -22,7 +40,7 @@ const API_URL = import.meta.env.VITE_API_URL;
  * Every endpoint path below stays relative (`/shelves`, `/search/all`, `/play/...`)
  * and is unchanged by this — it only decides the prefix they resolve against.
  */
-const API_BASE = `${String(API_URL || 'http://localhost:3001')
+const API_BASE = `${String(API_URL)
   .replace(/\/+$/, '')
   .replace(/\/api$/, '')}/api`;
 
@@ -135,7 +153,23 @@ export const musicApi = {
   getAlbum: (source, id) => api.get(`/album/${source}/${id}`),
 
   // Stream URL
+  //
+  // `getStreamUrl` returns a signed googlevideo link and stays available for
+  // diagnostics, but it is NOT what the player should load. That link is
+  // cross-origin, bound to the Worker IP that resolved it, and a common content
+  // blocker target — any of which yields a media request that transfers zero bytes
+  // while this call still returns a clean 200.
   getStreamUrl: (source, id) => api.get(`/stream/${source}/${id}`),
+
+  /**
+   * Same-origin audio URL for the player.
+   *
+   * The Worker resolves the googlevideo URL, fetches the bytes, and streams them
+   * through with Range support, so the browser only ever talks to this API. Keeping
+   * the media same-origin also means this API's CORS headers are the only ones that
+   * apply, and a cross-origin CDN hop cannot silently break playback again.
+   */
+  getAudioUrl: (source, id) => `${API_BASE}/audio/${source}/${encodeURIComponent(id)}`,
 
   /**
    * Resolve a playable source for a track from any provider.

@@ -103,20 +103,21 @@ export function PlayerProvider({ children }) {
   );
 
   /**
-   * Resolve a stream URL for a track, whatever provider it came from.
+   * Resolve a source the player can actually load.
    *
-   * Tries the track's own provider first — which is a no-op for YouTube and the
-   * existing fast path is preserved verbatim — then falls back to the provider-aware
-   * endpoint. A Spotify-sourced track has no audio of its own, so the fallback is
-   * what makes it playable at all.
+   * Returns an API-hosted audio URL rather than the signed googlevideo link. The
+   * provider is still resolved server-side, so a Spotify-sourced track keeps working
+   * by being matched to a YouTube upload — only the final hop changes, from a
+   * cross-origin CDN URL to this API. That hop was the failure: the API call
+   * returned 200 with a valid-looking `streamUrl`, and then the browser's media
+   * request to googlevideo transferred nothing.
    *
    * @returns {Promise<{streamUrl: string, source: string}>}
    */
   const resolveStream = useCallback(async (track) => {
     // Fast path: YouTube tracks resolve directly, exactly as they always have.
     if (track.source === 'youtube') {
-      const { streamUrl } = await musicApi.getStreamUrl('youtube', track.id);
-      return { streamUrl, source: 'youtube' };
+      return { streamUrl: musicApi.getAudioUrl('youtube', track.id), source: 'youtube' };
     }
 
     // Any other provider has no stream endpoint of its own, so ask the backend to
@@ -125,7 +126,13 @@ export function PlayerProvider({ children }) {
     if (!resolved?.streamUrl) {
       throw new Error(`No playable source for ${track.source} track`);
     }
-    return { streamUrl: resolved.streamUrl, source: resolved.source };
+    return {
+      // `track.id` is the matched upload's id on whichever provider won, which is
+      // the id the audio endpoint has to be asked for — not the Spotify id the
+      // listener clicked.
+      streamUrl: musicApi.getAudioUrl(resolved.source, resolved.track?.id ?? track.id),
+      source: resolved.source,
+    };
   }, []);
 
   // Load and play track
