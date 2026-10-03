@@ -157,9 +157,16 @@ to the Node server. Point it at the Worker with `VITE_API_URL=https://<worker>.w
 headers and credential exposure, the bare-array shelves contract, cache headers, error statuses,
 and a stream URL that actually resolves audio.
 
+CORS gets five dedicated checks because it fails in a uniquely misleading way: a missing
+`Access-Control-Allow-Origin` makes the browser report a CORS error and hide the real status,
+so an ordinary 404 or 500 looks like a network fault. The suite pins the production origin,
+the `204` preflight for `GET, POST, PUT, DELETE, OPTIONS` with `Content-Type` and
+`Authorization`, the absence of any wildcard or prefix-match grant, and — the one that is
+easiest to regress silently — that the CORS header survives 404, 413 and 400 responses.
+
 | Suite | Target | Result |
 |---|---|---|
-| `test:compat` | Worker `:8787` | **33 passed, 0 failed** |
+| `test:compat` | Worker `:8787` | **37 passed, 0 failed** |
 | `test:api` | Express `:3001` | 11 passed, 0 failed |
 | `test:discovery` | in-process | 52 passed, 0 failed |
 | `test:metadata` | in-process | 19 passed, 0 failed |

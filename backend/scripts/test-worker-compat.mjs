@@ -104,6 +104,91 @@ const checks = {
     );
   },
 
+  /**
+   * The production frontend origin must be allowed without any configuration, so a
+   * misconfigured `ALLOWED_ORIGINS` can never lock the deployed site out of its own
+   * API and surface as an unexplained browser CORS error.
+   */
+  async corsProductionOrigin() {
+    const { headers, status } = await get('/api/providers', 'https://spotuner.vercel.app');
+    assert(status === 200, `expected 200, got ${status}`);
+    assert(
+      headers.get('access-control-allow-origin') === 'https://spotuner.vercel.app',
+      `expected the production origin to be echoed, got ${headers.get('access-control-allow-origin')}`,
+    );
+  },
+
+  /** A wildcard, or a prefix match on the production origin, would be a real leak. */
+  async corsNeverWildcard() {
+    for (const origin of ['https://evil.example', 'https://spotuner.vercel.app.evil.com', 'null']) {
+      const { headers } = await get('/api/providers', origin);
+      const granted = headers.get('access-control-allow-origin');
+      assert(granted !== '*', `expected no wildcard grant for ${origin}, got ${granted}`);
+      assert(granted === null, `expected no grant for ${origin}, got ${granted}`);
+    }
+  },
+
+  /**
+   * Preflight is what a browser sends before any JSON POST, and it is answered by the
+   * CORS layer alone. If it regresses, every write endpoint fails in the browser
+   * while the same request succeeds from curl.
+   */
+  async corsPreflight() {
+    const { status, headers } = await call('/api/hero-image', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://spotuner.vercel.app',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+      },
+    });
+
+    assert(status === 204, `expected 204, got ${status}`);
+    assert(
+      headers.get('access-control-allow-origin') === 'https://spotuner.vercel.app',
+      `expected the production origin, got ${headers.get('access-control-allow-origin')}`,
+    );
+
+    const methods = (headers.get('access-control-allow-methods') ?? '').split(',').map((m) => m.trim());
+    for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
+      assert(methods.includes(method), `expected ${method} in Access-Control-Allow-Methods, got "${methods.join(',')}"`);
+    }
+
+    const allowed = (headers.get('access-control-allow-headers') ?? '').toLowerCase();
+    for (const header of ['content-type', 'authorization']) {
+      assert(allowed.includes(header), `expected ${header} in Access-Control-Allow-Headers, got "${allowed}"`);
+    }
+  },
+
+  /**
+   * CORS headers must survive the error paths too. A 4xx or 5xx that loses its
+   * `Access-Control-Allow-Origin` is reported by the browser as a CORS failure,
+   * which hides the real status and makes the bug look like a network problem.
+   */
+  async corsOnErrorResponses() {
+    const cases = [
+      ['404 not found', '/api/definitely-not-a-route', {}],
+      [
+        '413 payload too large',
+        '/api/artists/images',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: ['x'.repeat(300000)] }) },
+      ],
+      [
+        '400 validation',
+        '/api/language/detect',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+      ],
+    ];
+
+    for (const [name, path, init] of cases) {
+      const { headers } = await call(path, { ...init, headers: { Origin: 'https://spotuner.vercel.app', ...(init.headers ?? {}) } });
+      assert(
+        headers.get('access-control-allow-origin') === 'https://spotuner.vercel.app',
+        `${name}: expected the CORS header to survive, got ${headers.get('access-control-allow-origin')}`,
+      );
+    }
+  },
+
   async notFound() {
     const { status, json } = await get('/api/definitely-not-a-route');
     assert(status === 404, `expected 404, got ${status}`);

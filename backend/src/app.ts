@@ -43,16 +43,28 @@ const DEFAULT_ORIGINS = [
 
 const app = new Hono();
 
+/**
+ * Resolve the request's origin against the allow-list.
+ *
+ * `ALLOWED_ORIGINS` is a comma-separated list in `wrangler.jsonc`. It is *unioned*
+ * with the defaults rather than replacing them, so a typo or a stale redeploy can
+ * never lock the deployed frontend out of its own API and present it as an
+ * unexplained CORS failure — the failure mode this exists to prevent. Origins are
+ * compared exactly, so a prefix or wildcard is never accepted.
+ */
+function allowOrigin(origin: string): string | null {
+  if (!origin) return null;
+  const configured = envList('ALLOWED_ORIGINS', DEFAULT_ORIGINS);
+  const allowed = new Set([...DEFAULT_ORIGINS, ...configured]);
+  return allowed.has(origin) ? origin : null;
+}
+
 app.use(
   '*',
   cors({
-    origin: (origin) => {
-      if (!origin) return null;
-      const allowed = envList('ALLOWED_ORIGINS', DEFAULT_ORIGINS);
-      return allowed.includes(origin) ? origin : null;
-    },
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type'],
+    origin: allowOrigin,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
     // Hono's option is `credentials`; it emits Access-Control-Allow-Credentials.
     credentials: true,
     // `/api/shelves` reports its cache state in these two headers, and a browser
