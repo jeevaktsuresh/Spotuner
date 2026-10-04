@@ -12,6 +12,7 @@ import PlayerBar from './components/Player/PlayerBar';
 import Home from './components/Pages/Home';
 import Search from './components/Pages/Search';
 import Radio from './components/Pages/Radio';
+import New from './components/Pages/New';
 import Browse from './components/Pages/Browse';
 import Artists from './components/Pages/Artists';
 import Artist from './components/Pages/Artist';
@@ -108,6 +109,7 @@ export default function App() {
                         <Route path="/search" element={<Search />} />
                         <Route path="/browse" element={<Browse />} />
                         <Route path="/radio" element={<Radio />} />
+                        <Route path="/new" element={<New />} />
                         <Route path="/artists" element={<Artists />} />
                         {/* Declared after /artists so the list still matches exactly. */}
                         <Route path="/artists/:artistKey" element={<Artist />} />

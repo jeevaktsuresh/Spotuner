@@ -64,6 +64,40 @@ const cases = [
   ['HeroCarousel', () => h(HeroCarousel, { slides: [{ key: 'k1', ...track, isArtworkOnly: true, background: '#111' }], onPlay: noop, onSave: noop })],
   ['HeroCarousel (empty slides)', () => h(HeroCarousel, { slides: [], onPlay: noop, onSave: noop })],
   ['HeroCarousel (gradient only)', () => h(HeroCarousel, { slides: [{ key: 'k2', title: 'T', background: 'linear-gradient(#000,#111)' }], onPlay: noop, onSave: noop })],
+  // The mode Home uses: index owned by the parent so the actions cannot drift
+  // from the visible slide.
+  ['HeroCarousel (controlled)', () => h(HeroCarousel, {
+    slides: [
+      { key: 'a', ...track, background: '#111' },
+      { key: 'b', ...track, id: 'def456', title: 'Second', background: '#222' },
+    ],
+    index: 1,
+    onIndexChange: noop,
+    onPlay: noop,
+    onSave: noop,
+  })],
+  ['HeroCarousel (liked)', () => h(HeroCarousel, {
+    slides: [{ key: 'k1', ...track, background: '#111' }],
+    index: 0,
+    onIndexChange: noop,
+    onPlay: noop,
+    onSave: noop,
+    isLiked: true,
+  })],
+  ['HeroCarousel (index past end)', () => h(HeroCarousel, {
+    slides: [{ key: 'k1', ...track, background: '#111' }],
+    index: 9,
+    onIndexChange: noop,
+    onPlay: noop,
+    onSave: noop,
+  })],
+  ['HeroCarousel (no resolved title)', () => h(HeroCarousel, {
+    slides: [{ key: 'k1', track, background: '#111' }],
+    index: 0,
+    onIndexChange: noop,
+    onPlay: noop,
+    onSave: noop,
+  })],
 ];
 
 let failures = 0;

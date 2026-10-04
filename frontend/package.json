@@ -10,10 +10,11 @@
     "test:render": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/render.js",
     "test:recommend": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/recommend.js",
     "test:live": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/live.js",
+    "check:home": "vite build --config vite.smoke.config.js && node node_modules/.test-bundle/home.js",
     "check:artists": "node scripts/check-artists.mjs",
     "check:artist-images": "node scripts/check-artist-images.mjs",
     "probe:artist-page": "node scripts/probe-artist-page.mjs",
-    "test": "npm run test:render && npm run test:recommend",
+    "test": "npm run test:render && npm run test:recommend && npm run check:home -- --offline",
     "preview": "vite preview"
   },
   "dependencies": {

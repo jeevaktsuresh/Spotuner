@@ -1,4 +1,4 @@
-﻿import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLibrary } from '../../context/LibraryContext';
 import { usePlayer } from '../../context/PlayerContext';
@@ -15,6 +15,13 @@ import WideCard from '../Cards/WideCard';
 import useHeroImages from '../../hooks/useHeroImages';
 import useRecommendations from '../../hooks/useRecommendations';
 import useDiscovery from '../../hooks/useDiscovery';
+import useForYou from '../../hooks/useForYou';
+import {
+  trackKey,
+  decorateSlides,
+  selectHeroEntries,
+  heroQueueFor,
+} from '../../recommend/heroSlides';
 
 function greeting() {
   const hour = new Date().getHours();
@@ -23,30 +30,10 @@ function greeting() {
   return 'Good Evening';
 }
 
-/** Curated copy for the hero slides — static so the banner never reads empty. */
-const HERO_COPY = [
-  {
-    eyebrow: 'Recommended for you.',
-    title: 'Soulful Evenings',
-    description: 'A handpicked mix of melodies to match your mood.',
-  },
-  {
-    eyebrow: 'Made for you.',
-    title: 'Focus Flow',
-    description: 'Instrumental textures that keep you in the zone.',
-  },
-  {
-    eyebrow: 'Because you played these.',
-    title: 'Night Drive',
-    description: 'Late-night anthems and warm vocal harmonies.',
-  },
-  {
-    eyebrow: 'Trending this week.',
-    title: 'Top 40 India',
-    description: 'The songs everyone has on repeat right now.',
-  },
-];
-
+/**
+ * Where each hero slide comes from, and the line that says so — see
+ * `recommend/heroSlides.js`, which owns that mapping and its reasoning.
+ */
 function ShelfSkeleton() {
   return (
     <ShelfRow>
@@ -72,45 +59,50 @@ function ShelfSkeleton() {
  */
 export default function Home() {
   const { shelves, loading, error } = useShelves(10);
-  const { recentlyPlayed, likedSongs, toggleLike, playlists } = useLibrary();
+  const { recentlyPlayed, likedSongs, toggleLike, playlists, history } = useLibrary();
   const { currentTrack, isPlaying, isLoading, playTrack } = usePlayer();
   const { setQueue } = useQueue();
 
   const flat = useMemo(() => shelves.flatMap((s) => s.tracks ?? []), [shelves]);
 
+  const shelfById = useMemo(() => {
+    const map = new Map();
+    for (const shelf of shelves) map.set(shelf.id, shelf);
+    return map;
+  }, [shelves]);
+
   /**
-   * Hero source content, chosen before image matching so the matcher always
-   * receives real metadata to work with.
+   * Hero slides, one per named source. The pairing rules — and why each exists —
+   * live in `recommend/heroSlides.js`.
    */
-  const heroTracks = useMemo(() => {
-    const pool = flat.length > 0 ? flat : [...recentlyPlayed, ...likedSongs];
-    if (pool.length === 0) return [];
-
-    // Spread across the pool so slides don't all come from one shelf.
-    return HERO_COPY.slice(0, 4).map((copy, i) => ({
-      ...copy,
-      track: pool[(i * Math.max(1, Math.floor(pool.length / 4))) % pool.length],
-    }));
-  }, [flat, recentlyPlayed, likedSongs]);
-
-  // Resolve hero imagery asynchronously; the carousel paints immediately.
-  const { slides: heroSlides } = useHeroImages(heroTracks);
-
-  const enrichedSlides = useMemo(
-    () =>
-      heroSlides.map((slide) => {
-        const source = heroTracks.find((t) => t.track?.id === slide.track?.id);
-        return {
-          ...slide,
-          eyebrow: source?.eyebrow ?? slide.eyebrow,
-          description: source?.description ?? slide.description,
-        };
-      }),
-    [heroSlides, heroTracks],
+  const heroEntries = useMemo(
+    () => selectHeroEntries({ shelfById, recentlyPlayed, likedSongs }),
+    [shelfById, recentlyPlayed, likedSongs],
   );
 
-  const activeSlide = enrichedSlides[0];
-  const activeTrack = activeSlide?.track ?? null;
+  // Resolve hero imagery asynchronously; the carousel paints immediately. Raw
+  // tracks go in, not the paired entries: `useHeroImages` keys its cache on the
+  // track's own identity, and an entry without a top-level id would collapse
+  // every slide onto the same placeholder key.
+  const { slides: resolvedSlides } = useHeroImages(heroEntries.map((entry) => entry.track));
+
+  const slides = useMemo(
+    () => decorateSlides(resolvedSlides, heroEntries),
+    [resolvedSlides, heroEntries],
+  );
+
+  /**
+   * Which slide the banner is showing.
+   *
+   * Held here and passed down, so the Play/Like/Save handlers and the playing
+   * state are all derived from the same value the carousel renders. Previously
+   * the carousel advanced on its own while every handler stayed bound to
+   * `slides[0]`, so advancing the banner left the controls playing a different
+   * song than the one on screen.
+   */
+  const [heroIndex, setHeroIndex] = useState(0);
+  const activeIndex = slides.length === 0 ? 0 : Math.min(heroIndex, slides.length - 1);
+  const activeTrack = slides[activeIndex]?.track ?? null;
 
   /**
    * "Good Evening" cards.
@@ -140,20 +132,6 @@ export default function Home() {
   const recent = recentlyPlayed.slice(0, 8);
 
   /**
-   * Real shelves by id.
-   *
-   * Rows are sourced from the backend's shelves rather than invented here.
-   * The earlier "Made For You" row hard-coded labels like "Daily Mix 1" and
-   * bound each to a track picked by index, which produced confident-looking
-   * rows describing music that had nothing to do with the label.
-   */
-  const shelfById = useMemo(() => {
-    const map = new Map();
-    for (const shelf of shelves) map.set(shelf.id, shelf);
-    return map;
-  }, [shelves]);
-
-  /**
    * Trending and latest come from the discovery pipeline, which ranks by real
    * freshness signals rather than trusting a query. The shelf fallback exists so
    * the rows still render if discovery is unavailable.
@@ -168,20 +146,65 @@ export default function Home() {
     ? latestTracks
     : shelfById.get('new-releases')?.tracks ?? [];
 
-  const quickPickShelf = shelfById.get('made-for-you') ?? shelfById.get('featured');
+  /**
+   * Quick Picks is backed by one shelf, and the row's "See All" has to name that
+   * same shelf — the id is resolved once here and used for both, so the link can
+   * never point at a different shelf than the row shows.
+   */
+  const quickPickShelfId = shelfById.has('made-for-you') ? 'made-for-you' : 'featured';
+  const quickPickShelf = shelfById.get(quickPickShelfId);
   const quickPickTracks = quickPickShelf?.tracks ?? [];
 
-  /** Theme rows, each backed by its own backend shelf of real playable tracks. */
+  /**
+   * Personalised "Made For You" row.
+   *
+   * `useForYou` was already written for this and is safe to use here as-is: it
+   * summarises listening into a compact profile on the device, sends only
+   * relative affinities (no titles, timestamps or ids), keys its browser cache on
+   * a digest of that profile so two listeners cannot share one, and short-circuits
+   * to `tracks: []` when there is nothing to personalise from. `useRecommendations`
+   * above is pure client-side, so this is the only caller of
+   * `POST /api/discovery/foryou` and nothing is requested twice.
+   *
+   * Gated on the catalogue being loaded, because `buildProfileSummary` reads
+   * language and genre tags off it; firing earlier would send a thinner profile
+   * than necessary. The static `discover` shelf stands in whenever the
+   * personalised shelf is unavailable or the listener is new.
+   */
+  const {
+    tracks: forYouTracks,
+    hasProfile: hasForYouProfile,
+    loading: forYouLoading,
+  } = useForYou({
+    scope: 'global',
+    limit: 12,
+    catalogue: flat,
+    likedSongs,
+    recentlyPlayed,
+    history,
+    enabled: !loading,
+  });
+
+  const forYouFallback = shelfById.get('discover')?.tracks ?? [];
+  const forYouTracksToShow = forYouTracks.length > 0 ? forYouTracks : forYouFallback;
+
+  /**
+   * Theme rows.
+   *
+   * Titles come from the shelf itself rather than from labels written here. The
+   * hard-coded ones ("Chill Mix", "Workout Hits", "Romantic Evening") had drifted
+   * away from what the shelves actually returned — the shelves call them "Chill &
+   * Relax", "Workout Energy" and "Romantic" — which is the same defect as the hero
+   * copy: a confident label over music that does not match it.
+   *
+   * Each row also carries its own `seeAllTo`, so "See All" lands on the page that
+   * actually holds that row's music.
+   */
   const themedRows = useMemo(
     () =>
-      [
-        { id: 'chill', title: 'Chill Mix' },
-        { id: 'workout', title: 'Workout Hits' },
-        { id: 'romantic', title: 'Romantic Evening' },
-        { id: 'discover', title: 'Made For You' },
-      ]
-        .map(({ id, title }) => ({ id, title, tracks: shelfById.get(id)?.tracks ?? [] }))
-        .filter((row) => row.tracks.length > 0),
+      ['chill', 'workout', 'romantic']
+        .map((id) => ({ id, title: shelfById.get(id)?.title, tracks: shelfById.get(id)?.tracks ?? [] }))
+        .filter((row) => row.tracks.length > 0 && row.title),
     [shelfById],
   );
 
@@ -193,6 +216,32 @@ export default function Home() {
   function isThisPlaying(item) {
     return isPlaying && currentTrack?.id === item?.id && currentTrack?.source === item?.source;
   }
+
+  /**
+   * Liked state for the visible slide's track.
+   *
+   * Byte-for-byte the same rule `LibraryContext.toggleLike` applies — strict `id`
+   * *and* `source` equality, with no defaulting. Any looser check here disagrees
+   * with the write: a track whose sources differ on an absent field would render
+   * "Liked", and pressing the button would then like it again instead of
+   * removing the like, so the label would never change.
+   */
+  const activeIsLiked = Boolean(
+    activeTrack?.id &&
+      likedSongs.some((song) => song.id === activeTrack.id && song.source === activeTrack.source),
+  );
+
+  /**
+   * What "Play Now" queues.
+   *
+   * The visible slide's own shelf, not the flattened pool. Queuing `flat` put
+   * several hundred unrelated tracks behind the hero song, so the next track after
+   * it was effectively random.
+   */
+  const heroQueue = useMemo(() => {
+    const entry = heroEntries.find((candidate) => trackKey(candidate.track) === trackKey(activeTrack));
+    return heroQueueFor(entry, shelfById);
+  }, [activeTrack, heroEntries, shelfById]);
 
   if (loading) {
     return (
@@ -207,13 +256,18 @@ export default function Home() {
 
   return (
     <div className="page-shell">
-{/* ===== Hero ===== */}
-      {enrichedSlides.length > 0 ? (
+{/* ===== Hero =====
+          Controlled: `activeIndex` is the single source of truth for what is on
+          screen, and every action below reads it. */}
+      {slides.length > 0 ? (
         <HeroCarousel
-          slides={enrichedSlides}
+          slides={slides}
+          index={activeIndex}
+          onIndexChange={setHeroIndex}
           isPlaying={isThisPlaying(activeTrack)}
           isLoading={isLoading && isThisPlaying(activeTrack)}
-          onPlay={() => activeTrack && play(flat, activeTrack)}
+          isLiked={activeIsLiked}
+          onPlay={() => activeTrack && play(heroQueue, activeTrack)}
           onSave={() => activeTrack && toggleLike(activeTrack)}
         />
       ) : null}
@@ -221,7 +275,7 @@ export default function Home() {
       {/* ===== Good Evening — one algorithm per card ===== */}
       {quickPicks.length > 0 ? (
         <section className="mt-9">
-          <SectionHeading title={greeting()} seeAllTo="/browse" />
+          <SectionHeading title={greeting()} />
 
           <ShelfRow gap="gap-3.5">
             {quickPicks.map(({ title, subtitle, track, card }) => {
@@ -254,7 +308,7 @@ export default function Home() {
       {/* ===== Quick Picks ===== */}
       {quickPickTracks.length > 0 ? (
         <section className="mt-9">
-          <SectionHeading title="Quick Picks" seeAllTo="/browse" />
+          <SectionHeading title="Quick Picks" seeAllTo={`/browse?shelf=${quickPickShelfId}`} />
 
           <ShelfRow gap="gap-3.5">
             {quickPickTracks.slice(0, 8).map((track) => (
@@ -275,7 +329,7 @@ export default function Home() {
       {/* ===== Trending Now ===== */}
       {trending.length > 0 ? (
         <section className="mt-9">
-          <SectionHeading title="Trending Now" seeAllTo="/browse" />
+          <SectionHeading title="Trending Now" seeAllTo="/browse?shelf=trending" />
 
           <ShelfRow>
             {trending.map((track, i) => (
@@ -297,7 +351,7 @@ export default function Home() {
       {/* ===== Latest Releases ===== */}
       {latest.length > 0 ? (
         <section className="mt-9">
-          <SectionHeading title="Latest Releases" seeAllTo="/browse" />
+          <SectionHeading title="Latest Releases" seeAllTo="/new" />
 
           <ShelfRow>
             {latest.map((track) => (
@@ -343,10 +397,50 @@ export default function Home() {
         )}
       </section>
 
+      {/* ===== Made For You — personalised, with the Discover shelf as fallback =====
+          Renders the same `forYouTracks` it falls back to, so the row is
+          indistinguishable from the static one while the request is in flight or
+          has failed. The subtitle names which of the two is on screen, so the
+          "personalised" claim is never made over a shelf. */}
+      {forYouTracksToShow.length > 0 ? (
+        <section className="mt-9">
+          <SectionHeading
+            title="Made For You"
+            seeAllTo="/browse?shelf=discover"
+          />
+
+          {forYouLoading && !hasForYouProfile ? (
+            <p className="mb-3 text-[11.5px] text-label-tertiary">
+              Learning what you listen to…
+            </p>
+          ) : forYouTracks.length === 0 ? (
+            <p className="mb-3 text-[11.5px] text-label-tertiary">
+              {hasForYouProfile
+                ? 'Not enough plays yet to personalise — showing Discover.'
+                : 'Play a few tracks and this row becomes personal.'}
+            </p>
+          ) : null}
+
+          <ShelfRow>
+            {forYouTracksToShow.map((track) => (
+              <WideCard
+                key={`${track.source ?? 'yt'}-${track.id}`}
+                title={track.title}
+                subtitle={track.artist}
+                image={track.image}
+                bgColor={track.bgColor}
+                isPlaying={isThisPlaying(track)}
+                onPlay={() => play(forYouTracksToShow, track)}
+              />
+            ))}
+          </ShelfRow>
+        </section>
+      ) : null}
+
       {/* ===== Theme rows, each a real backend shelf ===== */}
       {themedRows.map((row) => (
         <section key={row.id} className="mt-9">
-          <SectionHeading title={row.title} seeAllTo="/browse" />
+          <SectionHeading title={row.title} seeAllTo={`/browse?shelf=${row.id}`} />
 
           <ShelfRow>
             {row.tracks.map((track) => (

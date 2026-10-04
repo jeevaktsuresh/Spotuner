@@ -20,6 +20,7 @@ export default defineConfig({
         recommend: 'scripts/check-recommend.mjs',
         render: 'scripts/render-smoke.mjs',
         live: 'scripts/live-check.mjs',
+        home: 'scripts/check-home.mjs',
       },
     },
   },
