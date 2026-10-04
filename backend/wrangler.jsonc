@@ -1,89 +1,120 @@
 {
-  // Wrangler configuration for the Spotuner API Worker.
-  //
-  // Secrets are NOT declared here — `SPOTIFY_CLIENT_SECRET` and friends are set
-  // with `wrangler secret put`, which stores them encrypted and injects them as
-  // runtime bindings. Plain-text values belong under `vars` only when they are
-  // genuinely public configuration.
-  //
-  //   npx wrangler kv namespace create CACHE
-  //   npx wrangler kv namespace create ARTIST_IMAGES
-  //   npx wrangler secret put SPOTIFY_CLIENT_ID
-  //   npx wrangler secret put SPOTIFY_CLIENT_SECRET
-  //   npm run deploy
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "spotuner-api",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-09-01",
+	// Wrangler configuration for the Spotuner API Worker.
+	//
+	// Secrets are NOT declared here — `SPOTIFY_CLIENT_SECRET` and friends are set
+	// with `wrangler secret put`, which stores them encrypted and injects them as
+	// runtime bindings. Plain-text values belong under `vars` only when they are
+	// genuinely public configuration.
+	//
+	//   npm run kv:create
+	//   npm run secret:spotify-id
+	//   npm run secret:spotify-secret
+	//   npm run deploy
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "spotuner-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-09-01",
+	// `nodejs_compat` supplies Buffer and the ESM/Node builtins the shared `lib/`
+	// modules use (Buffer in the image prober, base64 in the Spotify client, dynamic
+	// `node:*` imports in the Node-only yt-dlp fallback).
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 
-  // `nodejs_compat` supplies Buffer and the ESM/Node builtins the shared `lib/`
-  // modules use (Buffer in the image prober, base64 in the Spotify client, dynamic
-  // `node:*` imports in the Node-only yt-dlp fallback).
-  "compatibility_flags": ["nodejs_compat"],
-
-  // Discovery is a multi-second, many-request pipeline: hydrating 90 videos,
-  // enriching, then building editorial shelves that fan out into dozens of YouTube
-  // searches. The default 30s CPU ceiling is not enough headroom for a cold run, so
-  // the paid-plan limit is requested explicitly. A cold `/api/shelves` still costs
-  // far more than 50 subrequests, which means the paid plan is a requirement, not
-  // an optimisation.
-  "limits": {
-    "cpu_ms": 300000
-  },
-
-  "kv_namespaces": [
-    {
-      "binding": "CACHE",
-      "id": "YOUR_CACHE_KV_NAMESPACE_ID",
-      "preview_id": "YOUR_CACHE_KV_PREVIEW_NAMESPACE_ID"
-    },
-    {
-      "binding": "ARTIST_IMAGES",
-      "id": "YOUR_ARTIST_IMAGES_KV_NAMESPACE_ID",
-      "preview_id": "YOUR_ARTIST_IMAGES_KV_PREVIEW_NAMESPACE_ID"
-    }
-  ],
-
-  "vars": {
-    // Comma-separated allow-list for CORS. Development plus the production Vercel
-    // deployment; add preview origins rather than widening this to `*`.
-    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,https://spotuner.vercel.app",
-
-    // Discovery tuning. Every one of these preserves its original default; they
-    // are spelled out so a deployment can tune without reading the source.
-    "SPOTUNER_TTL_TRENDING_MS": "1200000",
-    "SPOTUNER_TTL_LATEST_MS": "2700000",
-    "SPOTUNER_TTL_CATALOG_MS": "21600000",
-    "SPOTUNER_STALE_GRACE_MS": "1800000",
-    "SPOTUNER_TRENDING_WINDOW_DAYS": "210",
-    "SPOTUNER_RELEASE_WINDOW_DAYS": "365",
-    "SPOTUNER_MIN_TRENDING_SCORE": "12",
-    "SPOTUNER_MIN_LATEST_SCORE": "18",
-    "SPOTUNER_REPETITION_WEIGHT": "1",
-    "SPOTUNER_HYDRATE_LIMIT": "90",
-    "SPOTUNER_META_CONCURRENCY": "8",
-
-    // Enrichment tuning. MusicBrainz is rate-limited to roughly one request per
-    // second, so ENRICH_LIMIT is the main control on cold-run duration.
-    "SPOTUNER_ENRICH_LIMIT": "24",
-    "SPOTUNER_MAX_ENRICHERS": "2",
-    "SPOTUNER_MB_INTERVAL_MS": "1050",
-
-    // Artist image lookup (iTunes). No key required.
-    "SPOTUNER_ITUNES_INTERVAL_MS": "110",
-    "SPOTUNER_ITUNES_BACKOFF_MS": "900000",
-
-    // How many recent artist-image keys a cold isolate pulls into memory. Every KV
-    // read is a subrequest against the 1000-per-invocation ceiling, so this is a
-    // subrequest budget rather than a cache size. Lower it on the free plan.
-    "SPOTUNER_ARTIST_PRIME_LIMIT": "250",
-
-    // Report as `production` for the language detector's default-off debug
-    // logging. The Worker runtime has no NODE_ENV of its own.
-    "SPOTUNER_LANGUAGE_DEBUG": "0"
-  },
-
-  "observability": {
-    "enabled": true
-  }
+	// No `limits` block.
+	//
+	// `limits.cpu_ms` is a paid-plan-only setting: deploying it on the Free plan
+	// fails outright with Cloudflare error 100328, "CPU limits are not supported for
+	// the Free plan". Omitting the block lets the Worker inherit the plan default.
+	//
+	// Be aware of what that default is before expecting discovery to work. Free plan
+	// allows 10ms of CPU per invocation and 50 subrequests per invocation, while a
+	// cold `/api/shelves` hydrates 90 videos, enriches them and fans out into dozens
+	// of YouTube searches — several hundred subrequests, far beyond 50. Warm reads
+	// served from KV stay well inside both ceilings; cold builds and
+	// `POST /api/discovery/refresh` are the ones that will overrun.
+	// Both namespaces are load-bearing, and neither exists yet on a fresh account.
+	//
+	//   npm run kv:create
+	//
+	// creates all four namespaces (two production, two preview) and writes the real
+	// IDs into this file via `--update-config`, so nothing has to be pasted by hand
+	// and no placeholder can survive into a deploy. Until that command has been run,
+	// every ID below is the literal string "YOUR_..._NAMESPACE_ID" and Wrangler
+	// rejects the deploy with:
+	//
+	//   KV namespace "..." is not valid. [code: 10042]
+	//
+	// CACHE          short/medium-lived derived data: discovery results, search
+	//                merges, resolved stream URLs, language detections, hydrated video
+	//                metadata, hero images, provider cooldown state.
+	// ARTIST_IMAGES  the iTunes artist-image catalogue behind POST /api/artists/images.
+	//                It grows monotonically and is read in bulk, which is why it is a
+	//                separate namespace from the hot cache.
+	//
+	// `preview_id` is optional in the Wrangler schema and is only consulted by
+	// `wrangler dev`. `npm run kv:create` provisions it so remote development writes
+	// to a preview namespace instead of production.
+	"kv_namespaces": [
+		{
+			"binding": "CACHE",
+			"id": "2810957e137544a5b9ec99e49af519a3",
+			"preview_id": "0081bbf75acf4aea8fa269d7bdfc41db"
+		},
+		{
+			"binding": "ARTIST_IMAGES",
+			"id": "76ca12fd3c314cd180d70b36c2db1914",
+			"preview_id": "4deb906de51a4aaeb6b8a1f1db1a5093"
+		}
+	],
+	"vars": {
+		// Comma-separated allow-list for CORS. Development plus the production Vercel
+		// deployment; add preview origins rather than widening this to `*`.
+		"ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,https://spotuner.vercel.app",
+		// Discovery tuning. Every one of these preserves its original default; they
+		// are spelled out so a deployment can tune without reading the source.
+		"SPOTUNER_TTL_TRENDING_MS": "1200000",
+		"SPOTUNER_TTL_LATEST_MS": "2700000",
+		"SPOTUNER_TTL_CATALOG_MS": "21600000",
+		"SPOTUNER_STALE_GRACE_MS": "1800000",
+		"SPOTUNER_TRENDING_WINDOW_DAYS": "210",
+		"SPOTUNER_RELEASE_WINDOW_DAYS": "365",
+		"SPOTUNER_MIN_TRENDING_SCORE": "12",
+		"SPOTUNER_MIN_LATEST_SCORE": "18",
+		"SPOTUNER_REPETITION_WEIGHT": "1",
+		// Subrequest budget, not a quality dial.
+		//
+		// The Free plan allows 50 subrequests per invocation. A cold `/api/shelves`
+		// needs roughly 149: 8 static shelf searches + 3 discovery catalog searches +
+		// one metadata call per hydrated video + one per enrichment. Cloudflare kills
+		// any invocation that exceeds the ceiling, and because it kills it *before*
+		// this Worker can respond, the browser sees a bodiless `503` with no CORS
+		// headers and reports it as "No 'Access-Control-Allow-Origin' header".
+		//
+		// These three values are what keep a cold build inside the ceiling:
+		//   8 shelf searches + 3 catalog searches + 10 hydrations + 4 enrichments
+		//   = ~25 subrequests, leaving headroom for KV reads.
+		//
+		// The cost is real: shelves and home hold fewer tracks than they would with
+		// the previous 90/24/2. Raising them requires a paid plan, which lifts the
+		// ceiling to 1000 subrequests and 30s of CPU.
+		"SPOTUNER_HYDRATE_LIMIT": "10",
+		"SPOTUNER_META_CONCURRENCY": "8",
+		"SPOTUNER_ENRICH_LIMIT": "4",
+		"SPOTUNER_MAX_ENRICHERS": "1",
+		"SPOTUNER_MB_INTERVAL_MS": "1050",
+		// Artist image lookup (iTunes). No key required.
+		"SPOTUNER_ITUNES_INTERVAL_MS": "110",
+		"SPOTUNER_ITUNES_BACKOFF_MS": "900000",
+		// How many recent artist-image keys a cold isolate pulls into memory. Every KV
+		// read is a subrequest against the 1000-per-invocation ceiling, so this is a
+		// subrequest budget rather than a cache size. Lower it on the free plan.
+		"SPOTUNER_ARTIST_PRIME_LIMIT": "250",
+		// Report as `production` for the language detector's default-off debug
+		// logging. The Worker runtime has no NODE_ENV of its own.
+		"SPOTUNER_LANGUAGE_DEBUG": "0"
+	},
+	"observability": {
+		"enabled": true
+	}
 }

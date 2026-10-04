@@ -53,6 +53,7 @@ degrading.
 - [What it does](#-what-it-does)
 - [Tech stack](#-tech-stack)
 - [Quick start](#-quick-start)
+- [Deployment](#-deployment)
 - [Configuration](#-configuration)
 - [API reference](#-api-reference)
 - [Architecture](#-architecture)
@@ -127,18 +128,23 @@ degrading.
 ### Backend
 | Package | Purpose |
 |---|---|
-| Hono 4 on Cloudflare Workers | HTTP server and routing |
+| Express 4 on Node | HTTP server and routing — **the deployed entrypoint** |
+| Hono 4 on Cloudflare Workers | Same routes, for an optional Worker deployment |
 | YouTube InnerTube API | Search, metadata, stream URL resolution |
+| yt-dlp | Stream URL resolution on Node (see [Prerequisites](#-prerequisites)) |
 | iTunes Search API | Artist imagery |
-| Cloudflare KV | Discovery, search, stream, metadata, language, hero-image and artist-image caching |
+| In-memory cache (Cloudflare KV on the Worker) | Discovery, search, stream, metadata, language, hero-image and artist-image caching |
 | Spotify Web API | Optional metadata and peer search (never playback) |
 | MusicBrainz | Optional metadata enrichment |
 | axios (fetch adapter) | HTTP client |
-| Wrangler | Local dev server, KV provisioning, deploy, logs |
+| Wrangler | Only for the optional Worker deployment and the local KV dev server |
 
-The Worker is the deployed entrypoint. `backend/server.js` remains a Node/Express server with
-identical responses for local debugging on Node, and is what `npm run dev:node` starts. See
-[backend/MIGRATION.md](backend/MIGRATION.md) for what changed and why.
+`backend/server.js` is what runs, on Node, under systemd. `backend/src/` holds the same routes as
+a Hono app for a Cloudflare Worker; that path is optional, not the deployment, and it has no
+`node:child_process`, so playback there depends on stream URLs that truncate (see
+[Known limitations](#️-known-limitations)). `npm run dev:node` starts the Node server for local
+work. See [backend/MIGRATION.md](backend/MIGRATION.md) for what changed and why, and
+[deploy/README.md](deploy/README.md) for the running deployment.
 
 ### Frontend
 | Package | Purpose |
@@ -159,12 +165,19 @@ Styling is configured entirely in `src/index.css` via Tailwind v4's `@theme`. Th
 ## 🚀 Quick start
 
 ### Prerequisites
-- **Node.js 18+** (developed against Node 24)
-- **A Cloudflare account** — only to deploy. Local development needs nothing beyond Node.
-- **yt-dlp** — *optional*, and no longer how playback works. Stream URLs now come from the
-  YouTube InnerTube `/player` endpoint, which runs in any runtime. yt-dlp is kept only as a
-  Node-side fallback (`npm run dev:node`); the Worker never invokes it. It is bundled at
-  `backend/bin/yt-dlp/yt-dlp.exe` on Windows, or put it on `PATH` elsewhere.
+- **Node.js 18+** (developed and deployed against Node 24)
+- **yt-dlp** — *required on Node*, and unreachable in the Worker. Playback needs a
+  googlevideo URL, and only the VISIONOS-client URL serves a whole track; the InnerTube
+  `/player` URLs this app resolves directly truncate at ~1.5 MB of offset (see
+  [Known limitations](#️-known-limitations)). yt-dlp is the only thing that can reach that client, so
+  `backend/lib/youtube.js` asks it first on Node and falls back to `/player`. On a Worker
+  `node:child_process` cannot be imported, so the Worker resolves through `/player` alone and
+  playback is capped there. Bundled at `backend/bin/yt-dlp/yt-dlp.exe` on Windows; on Linux,
+  `pip install --user yt-dlp` (the standalone binary from the yt-dlp releases also works and
+  needs no Python packages). It must be on the `PATH` of whatever runs the server — a systemd
+  unit does not read your shell rc files.
+- **A Cloudflare account** — only for the optional Worker deployment. The running deployment
+  needs nothing beyond Node and yt-dlp.
 
 ### Install
 
@@ -182,9 +195,9 @@ npm install
 ### Run
 
 ```bash
-# Terminal 1 — Worker on http://127.0.0.1:8787  (this is the deployed path)
+# Terminal 1 — API on http://127.0.0.1:3001  (this is the deployed entrypoint)
 cd backend
-npm run dev
+npm run dev:node
 
 # Terminal 2 — frontend on http://localhost:5173
 cd frontend
@@ -192,22 +205,54 @@ npm run dev
 ```
 
 Open **http://localhost:5173**. Verify the backend with
-`curl http://127.0.0.1:8787/health`.
+`curl http://127.0.0.1:3001/health`.
 
-To run the Node/Express fallback instead (port 3001):
+To serve the production bundle the way the deployment does — one origin, `/api` proxied to the
+backend, no CORS involved:
 
 ```bash
-cd backend
-npm run dev:node
+cd frontend && VITE_API_URL=/ npm run build
+cd .. && node deploy/serve.mjs        # http://127.0.0.1:8080
 ```
 
-Wrangler creates local KV namespaces automatically under `backend/.wrangler/state`, so there is
-nothing to provision before running locally. When the Worker is up, point the frontend at it with
-`VITE_API_URL=http://127.0.0.1:8787/api`; it otherwise defaults to the Node server on 3001.
+The Worker dev server (`npm run dev`, port 8787) is only for the optional Worker path. Wrangler
+creates local KV namespaces automatically under `backend/.wrangler/state`, so there is nothing to
+provision before running it; point the frontend at it with `VITE_API_URL=http://127.0.0.1:8787`.
 
 > The first request to a cold backend is slow — it runs live YouTube queries to build
 > shelves. Allow ~10–30s, and up to ~90s for a large uncached artist-image request.
-> Subsequent requests are served from KV and are typically single-digit milliseconds.
+> Subsequent requests are served from cache and are typically single-digit milliseconds.
+
+---
+
+## 📦 Deployment
+
+The app is self-hosted. One box serves everything: a Node process serves the built bundle and
+reverse-proxies the API, so the browser only ever talks to a single origin, and a second Node
+process runs the backend. Both are systemd user services, so they start at boot without a login.
+
+```
+browser ──▶ http://<host>:8080   spotuner-web   deploy/serve.mjs
+              ├── /             frontend/dist (static, SPA fallback)
+              └── /api, /health  ──▶ 127.0.0.1:3001   spotuner-api   node backend/server.js
+```
+
+Nothing outside the host is required at runtime: no Cloudflare Worker, no CDN, no third-party
+hosting. `backend/src/` keeps a Hono/Worker build of the same routes as an option, not as a
+dependency.
+
+| Piece | Where |
+|---|---|
+| Host install | [`deploy/README.md`](deploy/README.md) — layout, services, updates, diagnostics |
+| Static server and proxy | `deploy/serve.mjs` |
+| Units | `deploy/spotuner-api.service`, `deploy/spotuner-web.service` |
+| Backend config | `~/spotuner/backend/.env`, mode `600` |
+| Frontend build | `VITE_API_URL=/ npm run build` in `frontend/` |
+
+```bash
+systemctl --user status spotuner-api spotuner-web
+journalctl --user -u spotuner-api -f
+```
 
 ---
 
@@ -219,6 +264,26 @@ nothing to provision before running locally. When the Worker is up, point the fr
 |---|---|---|
 | `PORT` | `3001` | |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS allowlist |
+
+#### CORS
+
+The deployment is same-origin — `deploy/serve.mjs` serves the bundle and proxies `/api` to this
+server — so a browser never makes a cross-origin call and CORS is not on the critical path. It
+still applies to any other client that calls the API directly, so every response, including 4xx
+and 5xx, carries `Access-Control-Allow-Origin`. Without it the browser blocks the response and
+reports a CORS error, which hides the real status.
+
+| Header | Value |
+|---|---|
+| `Access-Control-Allow-Origin` | The request's origin, if allow-listed. Never `*` |
+| `Access-Control-Allow-Methods` | `GET, POST, PUT, DELETE, OPTIONS` |
+| `Access-Control-Allow-Headers` | `Content-Type, Authorization` |
+| `Access-Control-Allow-Credentials` | `true` |
+| `Access-Control-Expose-Headers` | `X-Spotuner-Cache, X-Spotuner-Cache-Age` |
+
+Origins are matched exactly, so neither a wildcard nor a prefix such as
+`https://spotuner.example.com.evil.com` is ever granted. `OPTIONS` is answered by the CORS layer
+with `204` before any route runs, which is what every JSON `POST` needs.
 
 ### Backend — optional tuning
 
@@ -267,10 +332,13 @@ gitignored; `.env.example` holds placeholders only.
 | `SPOTUNER_ENRICH_LIMIT` | 24 | Candidates enriched per discovery run |
 | `SPOTUNER_MAX_ENRICHERS` | 2 | Enrichment providers consulted per run |
 
-### Cloudflare — namespaces, secrets and deploy
+### Optional — Cloudflare Worker deployment
 
-The Worker needs two KV namespaces and two secrets. A **paid plan is required**: a cold
-`/api/shelves` fans out into far more than the free plan's 50 subrequests per invocation.
+Not part of the running deployment; the app is self-hosted. Kept because `backend/src/` still
+contains the Worker and it is a working alternative for anyone who wants one. Two things to know
+before choosing it: it needs **a paid plan** (a cold `/api/shelves` fans out into far more than the
+free plan's 50 subrequests per invocation), and playback stops after ~95 seconds there, because a
+Worker cannot spawn yt-dlp.
 
 ```bash
 cd backend
@@ -306,9 +374,9 @@ production without a second config path.
 
 ### Frontend — `frontend/.env`
 
-| Variable | Default |
+| Variable | Value in the deployment |
 |---|---|
-| `VITE_API_URL` | `http://localhost:3001/api` |
+| `VITE_API_URL` | `/` — same-origin, because `deploy/serve.mjs` proxies `/api` to the backend. Defaults to `/` in a production build with the variable unset, so a rebuild cannot silently point somewhere else. |
 
 ---
 
@@ -321,8 +389,17 @@ GET /health
 
 ### Streaming
 ```
-GET /api/stream/youtube/:videoId
+GET /api/stream/youtube/:videoId      # where the audio lives (JSON, signed URL)
+
+GET /api/audio/youtube/:videoId       # what the browser actually plays
 ```
+
+`/api/stream` answers with a signed `googlevideo.com` URL, which is enough for curl and
+not enough for a browser: it is cross-origin, bound to the IP that resolved it, and a
+well-known target for content blockers. `/api/audio` is what `frontend/src/services/api.js`
+points the player at — it resolves the URL, fetches the bytes and streams them through,
+so the browser only ever talks to this API. Accepts `Range`, forwards a clamped window,
+re-resolves once if the cached URL has been revoked, and advertises `Accept-Ranges`.
 
 ### Search
 ```
@@ -530,14 +607,20 @@ at `C:\Program Files\Google\Chrome\Application\chrome.exe` and both servers runn
 **Artist image coverage is ~20–30%.** iTunes throttles sustained traffic, and many credited
 performers have no catalogue entry — session singers, and lo-fi/ambient channels like
 "Sad Music" or "Lofi Sleep Chill" that are not artists at all. Resolved pictures are cached in
-the `ARTIST_IMAGES` KV namespace, and coverage climbs across sessions as backoffs
+the `ARTIST_IMAGES` namespace, and coverage climbs across sessions as backoffs
 expire. Everything else falls back to track artwork. Images are catalogue covers, not
 portrait photographs.
 
-**A paid Cloudflare plan is required, not optional.** The free plan allows 50 subrequests per
-invocation; a cold `/api/shelves` costs several hundred. A cold build takes 20–30s, and a large
-uncached `/api/artists/images` request can take ~90s, because the iTunes pacing is deliberately
-slow to avoid tripping throttling. Both are cached in KV afterwards.
+**Caches are per-process, not shared.** On Node there are no KV bindings, so `CACHE` and
+`ARTIST_IMAGES` degrade to in-memory state: a restart discards them and the first request rebuilds
+from live YouTube. That costs 20–30s for a cold `/api/shelves`, and a large uncached
+`/api/artists/images` request can take ~90s, because the iTunes pacing is deliberately slow to
+avoid tripping throttling. Everything afterwards is single-digit milliseconds. Nothing is shared
+with a Cloudflare deployment if one exists — the two would keep entirely separate caches.
+
+**A paid Cloudflare plan is required for the optional Worker deployment.** The free plan allows 50
+subrequests per invocation; a cold `/api/shelves` costs several hundred. Irrelevant to the
+self-hosted deployment, which has no such ceiling.
 
 **Spotify is a metadata provider, never a playback source.** The Spotify Web API does not
 expose an audio stream endpoint for third-party use, so a Spotify track is played through a
@@ -578,6 +661,16 @@ padding a shelf with stale tracks. Malayalam and Tamil are well populated.
 **Shelves are slow on a cold cache.** `/api/shelves` runs live YouTube queries and takes
 ~10s warm, considerably longer cold. This is a one-time cost per backend process: the route
 is cached with stale-while-revalidate, so navigation afterwards is served from memory.
+
+**InnerTube's own stream URLs truncate at ~1.5 MB, so a Worker can only play the first
+~95 seconds.** Measured, not assumed: a URL carrying `c=ANDROID` or `c=IOS` answers 206 up to
+about 1.5 MB of absolute offset and 403 beyond it, at every itag and under every User-Agent,
+including open-ended `bytes=0-`. The limit is a property of the client identity in the URL, not
+of the request. A `c=VISIONOS` URL serves the file whole — but that client answers
+`LOGIN_REQUIRED` to a direct `/player` call, because it needs the cookie and visitor bootstrap
+yt-dlp performs. So on Node, playback works only with yt-dlp installed, and on a deployed
+Worker playback stops after the opening ~95 seconds. Fixing the Worker path means a PO-token or
+visitor-data flow, which is a larger change than this codebase makes.
 
 **Unstable unofficial APIs.** InnerTube endpoints and yt-dlp break periodically. Version
 constants in `backend/lib/youtube.js` (`CLIENT`, `META_CLIENT`) are the first thing to bump

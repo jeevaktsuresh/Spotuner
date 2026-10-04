@@ -1,0 +1,21 @@
+[Unit]
+Description=Spotuner web (static bundle + API reverse proxy)
+Documentation=https://github.com/jeevaktsuresh/spotuner
+After=network-online.target spotuner-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/spotuner
+Environment=PORT=8080
+Environment=HOST=0.0.0.0
+Environment=WEB_ROOT=%h/spotuner/frontend/dist
+Environment=API_TARGET=http://127.0.0.1:3001
+ExecStart=%h/.local/node/bin/node deploy/serve.mjs
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { Readable } from 'node:stream';
 import * as youtube from './lib/youtube.js';
 import * as language from './lib/language/index.js';
 import * as discovery from './lib/discovery/index.js';
@@ -187,6 +188,196 @@ app.get('/api/stream/youtube/:videoId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ===== AUDIO PROXY =====
+//
+// `/api/stream/youtube/:videoId` above answers *where* the audio lives. That is enough
+// for curl and not enough for a browser: it hands the client a signed
+// `googlevideo.com` URL, which is cross-origin, tied to the IP that resolved it, and a
+// well-known target for content blockers. Any of those turns into a media request that
+// transfers zero bytes while the route above still returns a clean 200 — which is
+// exactly the failure this endpoint removes.
+//
+// So the browser is pointed here instead (`frontend/src/services/api.js`, `getAudioUrl`).
+// The server resolves the URL, fetches the bytes and streams them straight through.
+// Nothing is buffered: the upstream body is piped to the response as-is, so memory use
+// does not scale with track length.
+//
+// The googlevideo URL never reaches the client and is never logged. A signature is a
+// bearer credential for the media, and journal output is not private, so logs carry the
+// video id and status only. This is the Node transcription of `src/routes/playback.ts`.
+
+/** Only YouTube's own media CDN may be proxied, so this can never become a relay. */
+function isGoogleVideoUrl(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'googlevideo.com' || host.endsWith('.googlevideo.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upstream statuses that mean "this URL is finished", not "this video is unavailable".
+ *
+ * A cached URL can die before its TTL — the cache caps entries by the URL's own
+ * `expire`, but a link can also be revoked early. Answering 404 to the player here
+ * would be a lie: the track is fine, the link was stale, so the entry is dropped and
+ * one fresh resolution is attempted before giving up.
+ */
+const STALE_URL_STATUSES = new Set([403, 404, 410]);
+
+/** Resolve a fresh URL for a video, bypassing the cache. */
+async function resolveFresh(videoId) {
+  let url = null;
+  try {
+    url = await youtube.resolveStream(videoId);
+  } catch (error) {
+    // The video itself is the problem — deleted, private, region-blocked — rather than
+    // the proxy. Tagged so the handler can answer 404 instead of 500.
+    const unavailable = new Error(error?.message ?? 'Stream resolution failed');
+    unavailable.code = 'UNAVAILABLE';
+    throw unavailable;
+  }
+  if (!url) {
+    const unavailable = new Error('Stream URL not found');
+    unavailable.code = 'UNAVAILABLE';
+    throw unavailable;
+  }
+  await streamCache.set('youtube', videoId, url);
+  return url;
+}
+
+/**
+ * googlevideo imposes two limits on a signed media URL fetched from a datacenter IP,
+ * both measured rather than assumed:
+ *
+ *   window size   `bytes=0-1048575` is answered 206, `bytes=0-2097151` is 403
+ *   absolute offset  `bytes=1000000-1001023` is 206, `bytes=3000000-3001023` is 403
+ *
+ * An open-ended `bytes=0-` — which is exactly what a browser sends to start playback —
+ * violates the first limit and is always refused. Forwarding it verbatim is what turned
+ * "no audio" into a 502, so the window is clamped to something the CDN will serve and
+ * the browser asks for the next window as it buffers.
+ *
+ * The offset ceiling is the harder constraint and cannot be worked around from here:
+ * past roughly the first 1-2 MB the CDN refuses regardless of how fresh the URL is, so
+ * seeking deep into a long track is not available through this route.
+ */
+const MAX_RANGE_WINDOW = 1024 * 1024;
+
+/**
+ * Clamp a client `Range` header to a window googlevideo will serve.
+ *
+ * Returns the header to forward upstream, or null when the client sent no range. Only
+ * the single byte-range form is handled, which is all a media element sends; anything
+ * else passes through untouched rather than being guessed at.
+ */
+function clampRange(rangeHeader) {
+  if (!rangeHeader) return null;
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return rangeHeader;
+
+  const [, rawStart, rawEnd] = match;
+  if (rawStart === '' && rawEnd === '') return rangeHeader;
+
+  const start = rawStart === '' ? 0 : Number(rawStart);
+  if (!Number.isFinite(start)) return rangeHeader;
+
+  // An open-ended range has an infinite end, which is precisely the case that needs
+  // clamping — so this must test for NaN, not for finiteness.
+  const requestedEnd = rawEnd === '' ? Number.POSITIVE_INFINITY : Number(rawEnd);
+  if (Number.isNaN(requestedEnd) || requestedEnd < start) return rangeHeader;
+
+  return `bytes=${start}-${Math.min(requestedEnd, start + MAX_RANGE_WINDOW - 1)}`;
+}
+
+/**
+ * Forward the client's `Range` header, clamped to a window the CDN will serve.
+ *
+ * A refused URL is spent rather than broken, so `fetchMedia` resolves a new one and
+ * retries once. The short pause matters: the CDN throttles a URL that is reused quickly,
+ * and a burst of range requests would otherwise spend the replacement too.
+ */
+async function fetchMedia(videoId, range) {
+  const headers = {
+    // googlevideo rejects requests that do not look like a media client, and it serves
+    // 403 rather than 400 when it decides a request is not one.
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+  };
+  // The browser asks for a byte range so it can seek. Forwarding it is what makes 206
+  // work, and seeking is impossible without it.
+  if (range) headers.Range = range;
+
+  const attempt = async (url) => {
+    if (!isGoogleVideoUrl(url)) throw new Error('Refusing to proxy a non-googlevideo URL');
+    return fetch(url, { headers });
+  };
+
+  const cached = await streamCache.get('youtube', videoId);
+  const first = await attempt(cached ?? (await resolveFresh(videoId)));
+
+  if (!STALE_URL_STATUSES.has(first.status)) return first;
+
+  console.warn(`[audio] cached url rejected upstream (${first.status}) for ${videoId}; re-resolving`);
+
+  await streamCache.invalidate('youtube', videoId);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  return attempt(await resolveFresh(videoId));
+}
+
+const audioProxy = async (req, res) => {
+  const { videoId } = req.params;
+
+  if (!videoId) {
+    return res.status(400).json({ error: 'videoId is required' });
+  }
+
+  try {
+    const range = clampRange(req.headers.range);
+    const response = await fetchMedia(videoId, range);
+
+    if (!response.ok && response.status !== 206) {
+      const status = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+      console.warn(`[audio] upstream ${response.status} for ${videoId}`);
+      return res.status(status).json({ error: 'Upstream media unavailable' });
+    }
+
+    // Pass through only what describes the payload. Hop-by-hop and CORS headers are
+    // dropped: CORS is this API's own, applied by the middleware above.
+    res.setHeader('Content-Type', response.headers.get('content-type') ?? 'application/octet-stream');
+    for (const name of ['content-length', 'content-range', 'etag', 'last-modified']) {
+      const value = response.headers.get(name);
+      if (value) res.setHeader(name, value);
+    }
+    // Advertised unconditionally: the player uses it to decide whether seeking is
+    // possible, and googlevideo does support ranges.
+    res.setHeader('Accept-Ranges', 'bytes');
+    // Short, because the underlying signed URL is disposable and a stale one must not
+    // be reused from a browser cache.
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(response.status);
+
+    if (req.method === 'HEAD') {
+      return res.end();
+    }
+
+    // 206 when upstream honoured the range, 200 otherwise. The body is the upstream
+    // stream, not a buffered copy.
+    return Readable.fromWeb(response.body).pipe(res);
+  } catch (error) {
+    if (error?.code === 'UNAVAILABLE') {
+      return res.status(404).json({ error: 'Stream not available' });
+    }
+    console.error('Audio proxy error:', error?.message);
+    res.status(500).json({ error: 'Audio proxy failed' });
+  }
+};
+
+app.get('/api/audio/youtube/:videoId', audioProxy);
+app.head('/api/audio/youtube/:videoId', audioProxy);
 
 // Editorial shelves backing the New/Home grids. Each row is a themed YouTube
 // search, so the cards show real, playable music instead of placeholder art.

@@ -1,0 +1,24 @@
+[Unit]
+Description=Spotuner API (Node/Express fallback server)
+Documentation=https://github.com/jeevaktsuresh/spotuner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/spotuner/backend
+EnvironmentFile=-%h/spotuner/backend/.env
+Environment=NODE_ENV=production
+# A systemd user unit gets a minimal environment and reads no shell rc file, so PATH
+# is set explicitly. yt-dlp resolves to ~/.local/bin and is how playback gets a stream
+# URL that serves a whole track; without this the resolver silently falls back to the
+# InnerTube clients, whose URLs truncate at ~1.5 MB.
+Environment=PATH=%h/.local/bin:%h/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/node/bin/node server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

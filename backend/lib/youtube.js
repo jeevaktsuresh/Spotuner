@@ -519,10 +519,37 @@ async function buildLanguageShelf(shelf, limitPerShelf) {
 // kind from the yt-dlp output: still a direct progressive audio URL the browser
 // fetches itself, still nothing proxied or re-hosted by this backend.
 
-// `ANDROID_VR` returns `adaptiveFormats` with plain `url` values for audio-only
-// formats (itags 139/140/249/251). Verified against the live endpoint; the
-// fallbacks exist so a single client being throttled or changed does not end
-// playback, and are only reached when the first returns nothing.
+// Unciphered audio requires a client whose `/player` response carries plain `url`
+// values (itags 139/140/249/251). Probed live against the endpoint; see
+// scripts/probe-stream-clients.mjs for the evidence.
+//
+//   client                  audio formats   plain url   notes
+//   ANDROID_VR              4               yes         primary
+//   ANDROID (YouTube Music) 6               yes         most itags, incl. 599/600
+//   ANDROID_TESTSUITE       0               n/a         playabilityStatus UNPLAYABLE
+//   IOS                     -               n/a         HTTP 400 from every network
+//   WEB / MWEB / TVHTML5 /
+//   WEB_EMBEDDED_PLAYER     0               n/a         return no unciphered audio
+//   VISIONOS                5               yes         NOT usable from here: LOGIN_REQUIRED
+//
+// The last three groups are excluded deliberately rather than left in as harmless
+// fallbacks: each one costs a subrequest and up to a second of latency on every
+// call before contributing nothing, and subrequests are capped per invocation on the
+// Free plan.
+//
+// VISIONOS deserves its own note, because it is the one client whose URLs are *not*
+// truncated — and the reason it cannot simply be added here is the whole story of
+// playback. A URL from ANDROID or IOS stops serving at roughly 1.5 MB of absolute
+// offset, measured across every itag and every User-Agent; a URL from VISIONOS serves
+// the entire file, including open-ended `bytes=0-`. That is a per-client policy, so
+// the client identity in the URL is what decides how much of a track is playable.
+// Asking for VISIONOS directly answers LOGIN_REQUIRED without the cookie and visitor
+// bootstrap yt-dlp performs, so on Node the binary is asked instead — see
+// `resolveWithYtDlp`.
+//
+// A `signatureCipher` would need YouTube's deciphering JS to resolve, which is
+// exactly the native work this migration removed, so a client that only returns
+// ciphered URLs is no use here.
 const STREAM_CLIENTS = [
   {
     clientName: 'ANDROID_VR',
@@ -531,16 +558,10 @@ const STREAM_CLIENTS = [
     extra: { androidSdkVersion: 30 },
   },
   {
-    clientName: 'ANDROID_TESTSUITE',
-    clientVersion: '1.9',
-    userAgent: 'com.google.android.youtube/1.9 (Linux; U; Android 11) gzip',
+    clientName: 'ANDROID',
+    clientVersion: '20.10.38',
+    userAgent: 'com.google.android.apps.youtube.music/20.10.38 (Linux; U; Android 12; GB) gzip',
     extra: { androidSdkVersion: 30 },
-  },
-  {
-    clientName: 'IOS',
-    clientVersion: '19.29.1',
-    userAgent: 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)',
-    extra: { deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.1.0.22B83' },
   },
 ];
 
@@ -601,24 +622,41 @@ function playabilityReason(data) {
 }
 
 /**
- * Resolve an audio-only stream URL for a video id.
+ * Count the audio formats in a `/player` response and how many are directly usable.
  *
- * Tries each stream client in turn. A client that answers with no audio formats is
- * a miss, not a failure; a client that errors is skipped too. Only when every
- * client is exhausted does this throw, with the same semantics the yt-dlp path
- * had: the caller decides between 404 and 500 from the outcome.
- *
- * @param {string} videoId
- * @returns {Promise<string>} a direct googlevideo URL
+ * Split out so the resolver can log *why* a client yielded nothing. "0 formats" and
+ * "4 formats but all ciphered" are completely different failures, and collapsing
+ * both into `null` is what made this undiagnosable from a Worker log.
  */
+function inspectAudio(data) {
+  const formats = [
+    ...(data?.streamingData?.adaptiveFormats ?? []),
+    ...(data?.streamingData?.formats ?? []),
+  ].filter((format) => String(format?.mimeType ?? '').startsWith('audio/'));
+
+  const plain = formats.filter((format) => typeof format.url === 'string' && format.url);
+  return { audio: formats.length, plain: plain.length };
+}
+
 export async function resolveStream(videoId) {
   if (!videoId) throw new Error('no video id');
+
+  // yt-dlp goes first on Node, and only on Node: `node:child_process` cannot be
+  // imported in a Worker, so the dynamic specifier below throws inside the try and the
+  // catch turns that into "not available here". This is not a preference. Current
+  // yt-dlp resolves the VISIONOS player, and a VISIONOS URL is the only kind that
+  // serves a whole track through this backend — see `STREAM_CLIENTS` for the
+  // measurement. Everything below it truncates at ~1.5 MB.
+  const viaYtDlp = await resolveWithYtDlp(videoId).catch(() => null);
+  if (viaYtDlp) return viaYtDlp;
 
   let lastReason = null;
 
   for (const client of STREAM_CLIENTS) {
+    const label = `${client.clientName}/${client.clientVersion}`;
+
     try {
-      const { data } = await http.post(`${INNERTUBE}/player?alt=json&key=${KEY}`, {
+      const { status, data } = await http.post(`${INNERTUBE}/player?alt=json&key=${KEY}`, {
         context: { client: { clientName: client.clientName, clientVersion: client.clientVersion, hl: 'en', gl: 'US', ...client.extra } },
         videoId,
         contentCheckOk: true,
@@ -628,31 +666,47 @@ export async function resolveStream(videoId) {
       });
 
       const url = pickAudioUrl(data);
+      const counts = inspectAudio(data);
+
+      // Deliberately logs no URL and no signature: a googlevideo link is a bearer
+      // token for the media, and `wrangler tail` output is not private.
+      console.log(
+        `[youtube:stream] ${label} http=${status} playability=${data?.playabilityStatus?.status ?? 'unknown'} ` +
+          `audioFormats=${counts.audio} unciphered=${counts.plain} resolved=${Boolean(url)}`,
+      );
+
       if (url) return url;
 
       lastReason = playabilityReason(data);
     } catch (error) {
+      const upstream = error?.response?.status ?? null;
       lastReason = error?.message ?? null;
+      console.warn(
+        `[youtube:stream] ${label} failed http=${upstream ?? 'no-response'} ` +
+          `reason=${String(error?.message ?? error).slice(0, 160)}`,
+      );
     }
   }
 
-  // yt-dlp, if this is running on Node where a binary is present. Unreachable in a
-  // Worker, where the dynamic specifier below resolves to nothing and the import
-  // throws inside the try.
-  const viaYtDlp = await resolveWithYtDlp(videoId).catch(() => null);
-  if (viaYtDlp) return viaYtDlp;
-
   throw new Error(
-    lastReason ? `stream resolution failed: ${lastReason}` : 'yt-dlp returned no stream URL',
+    lastReason ? `stream resolution failed: ${lastReason}` : 'no client produced a stream URL',
   );
 }
 
 /**
- * The original `yt-dlp -g -f bestaudio` path, kept as a Node-only fallback.
+ * The original yt-dlp path, which is on Node again.
+ *
+ * It was demoted to a fallback when `resolveStream` was ported to Cloudflare, because
+ * a Worker cannot spawn a process. On Node it is the primary, for a measured reason:
+ * the URLs InnerTube hands back here (`c=ANDROID`, `c=IOS`) stop serving at roughly
+ * 1.5 MB of absolute offset, which is about 95 seconds of a 129 kbps track, while the
+ * VISIONOS URL current yt-dlp selects serves the file whole. Only yt-dlp can reach that
+ * client, because asking for it directly answers LOGIN_REQUIRED without yt-dlp's
+ * cookie and visitor bootstrap.
  *
  * `node:child_process` cannot be imported in a Worker, so the specifier is built at
- * runtime to keep it out of the bundle graph entirely. The error text preserves the
- * old installation hint, because that hint is still the right one on Node.
+ * runtime to keep it out of the bundle graph entirely; on the Worker the import throws
+ * and the caller treats yt-dlp as absent.
  */
 async function resolveWithYtDlp(videoId) {
   const specifier = ['node', 'child_process'].join(':');
@@ -674,14 +728,20 @@ async function resolveWithYtDlp(videoId) {
   const execPromise = promisify(exec);
   const url = `https://music.youtube.com/watch?v=${videoId}`;
 
+  // m4a first, because it is the only audio container every browser plays through an
+  // <audio> element. Left to itself yt-dlp prefers itag 251 (webm/opus) on bitrate,
+  // which is fine on Chrome and a coin flip on Safari.
+  const format = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio';
+
   let stdout;
   try {
-    ({ stdout } = await execPromise(`"${binary}" -g -f bestaudio --no-warnings --no-playlist "${url}"`, {
-      timeout: 45000,
-    }));
+    ({ stdout } = await execPromise(
+      `"${binary}" -g -f "${format}" --no-warnings --no-playlist "${url}"`,
+      { timeout: 45000 },
+    ));
   } catch (error) {
     if (error.code === 'ENOENT' || /not recognized|command not found/i.test(error.message)) {
-      throw new Error('yt-dlp is not installed. Run: pip install --target backend/bin/yt-dlp yt-dlp');
+      throw new Error('yt-dlp is not installed. Install it with: pip install --user yt-dlp');
     }
     throw new Error(`yt-dlp failed: ${String(error.message).split('\n')[0]}`);
   }

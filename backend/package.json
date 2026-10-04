@@ -8,7 +8,7 @@
     "start": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "kv:create": "wrangler kv namespace create CACHE && wrangler kv namespace create ARTIST_IMAGES",
+    "kv:create": "wrangler kv namespace create CACHE --binding CACHE --update-config && wrangler kv namespace create ARTIST_IMAGES --binding ARTIST_IMAGES --update-config && wrangler kv namespace create CACHE --binding CACHE --update-config --preview && wrangler kv namespace create ARTIST_IMAGES --binding ARTIST_IMAGES --update-config --preview",
     "secret:spotify-id": "wrangler secret put SPOTIFY_CLIENT_ID",
     "secret:spotify-secret": "wrangler secret put SPOTIFY_CLIENT_SECRET",
     "test:compat": "node scripts/test-worker-compat.mjs",
