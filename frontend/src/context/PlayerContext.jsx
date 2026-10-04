@@ -1,10 +1,32 @@
 import { createContext, useState, useEffect, useRef, useContext, useCallback } from 'react';
 import { Howl } from 'howler';
 import { musicApi } from '../services/api';
-import { QueueContext } from './QueueContext';
+import { QueueContext, stepIndex, NO_INDEX } from './QueueContext';
 import { useLibrary } from './LibraryContext';
 
 const PlayerContext = createContext();
+
+/**
+ * Turn a thrown value into something worth showing a listener.
+ *
+ * The API client either rejects with a message string or with a raw axios
+ * error, and `resolveStream` throws a plain `Error` for a track with no
+ * playable counterpart. All three are useless raw, so each is mapped to a short
+ * headline plus the underlying reason, which is kept because "it didn't work" is
+ * not something anyone can act on.
+ */
+function describePlaybackFailure(error, track) {
+  const title = track?.title ? `“${track.title}”` : 'that track';
+  const reason =
+    (typeof error === 'string' && error) ||
+    error?.message ||
+    (error?.response?.data?.error ?? null);
+
+  return {
+    message: `Couldn't play ${title}`,
+    hint: reason ? String(reason) : 'No playable source was found for this track.',
+  };
+}
 
 export function PlayerProvider({ children }) {
   const [currentTrack, setCurrentTrack] = useState(null);
@@ -23,17 +45,61 @@ export function PlayerProvider({ children }) {
    */
   const [playbackProvider, setPlaybackProvider] = useState(null);
 
+  /**
+   * The last playback failure, or null.
+   *
+   * Previously a failed load was logged and the player quietly moved on, so a
+   * track that could not be resolved looked identical to one that had finished.
+   * Nothing is silenced now: the message is held here until the listener
+   * dismisses it or a new track starts.
+   */
+  const [playbackError, setPlaybackError] = useState(null);
+
   const howlRef = useRef(null);
   const progressIntervalRef = useRef(null);
 
   // Safely access queue context - may not be available immediately
   const queueContext = useContext(QueueContext);
-  const { next } = queueContext || { next: () => {} };
+  const {
+    queue = [],
+    currentIndex = 0,
+    repeat = 'off',
+    setCurrentIndex,
+    seatIndexFor,
+  } = queueContext || {};
   const { addToRecentlyPlayed, recordCompletion } = useLibrary();
 
   // Howler callbacks close over stale state, so the playing track is mirrored
   // into a ref to keep the behavioural records accurate.
   const trackRef = useRef(null);
+
+  /**
+   * Live mirrors of everything a Howler callback needs.
+   *
+   * A Howl is constructed once per track and its `onend` keeps the closure it was
+   * built with. Ten skips later that closure would still read the queue position
+   * from the render in which the track started, which is why auto-advance read
+   * the wrong index and, before that, why it read one at all while never being
+   * wired to playback.
+   *
+   * They are mirrored in an effect rather than during render: a Howler callback
+   * only ever fires from a media event or a click, both of which happen after
+   * commit, so the mirrors are never a render behind.
+   */
+  const queueRef = useRef(queue);
+  const indexRef = useRef(currentIndex);
+  const repeatRef = useRef(repeat);
+  const volumeRef = useRef(volume);
+  const recordCompletionRef = useRef(recordCompletion);
+  const playTrackRef = useRef(null);
+
+  useEffect(() => {
+    queueRef.current = queue;
+    indexRef.current = currentIndex;
+    repeatRef.current = repeat;
+    volumeRef.current = volume;
+    recordCompletionRef.current = recordCompletion;
+  }, [queue, currentIndex, repeat, volume, recordCompletion]);
 
   const stopProgressTracking = useCallback(() => {
     if (progressIntervalRef.current) {
@@ -61,7 +127,7 @@ export function PlayerProvider({ children }) {
 
   /** Play a progressive audio file through Howler. */
   const playProgressive = useCallback(
-    (src, startVolume) => {
+    (src, startVolume, onEnded) => {
       return new Promise((resolve, reject) => {
         const howl = new Howl({
           src: [src],
@@ -88,9 +154,9 @@ export function PlayerProvider({ children }) {
             // Reaching the end means the listener heard the whole track, which
             // is the strongest positive signal the recommender has.
             if (trackRef.current) {
-              recordCompletion(trackRef.current, howl.duration(), true);
+              recordCompletionRef.current(trackRef.current, howl.duration(), true);
             }
-            next();
+            onEnded();
           },
           onplayerror: (_id, error) => reject(error),
         });
@@ -99,7 +165,7 @@ export function PlayerProvider({ children }) {
         howl.play();
       });
     },
-    [next, startProgressTracking, stopProgressTracking]
+    [startProgressTracking, stopProgressTracking]
   );
 
   /**
@@ -135,38 +201,161 @@ export function PlayerProvider({ children }) {
     };
   }, []);
 
-  // Load and play track
-  async function playTrack(track) {
-    teardown();
+  /**
+   * Move the queue position and start whatever it lands on.
+   *
+   * One path for both the transport buttons and auto-advance, so a skip from the
+   * PlayerBar and a skip because a track ended cannot drift apart. Returns false
+   * when the queue has nowhere to go, which is the end of the list with repeat
+   * off — a normal stop, not a failure.
+   *
+   * Declared before `playTrack` and reached through `playTrackRef`, which keeps
+   * the two mutually recursive steps from needing each other in a dep array.
+   */
+  const advance = useCallback(
+    (direction) => {
+      const list = queueRef.current;
+      const target = stepIndex(list, indexRef.current, repeatRef.current, direction);
 
-    setIsLoading(true);
-    setCurrentTrack(track);
-    setPosition(0);
-    setDuration(0);
-    trackRef.current = track;
+      if (target === NO_INDEX) return false;
 
-    try {
-      const { streamUrl, source } = await resolveStream(track);
+      const landing = list[target];
+      if (!landing) return false;
 
-      await playProgressive(streamUrl, volume);
+      // Seated before the play call so a second skip in the same tick steps from
+      // the new position rather than re-deriving the old one.
+      indexRef.current = target;
+      setCurrentIndex(target);
 
-      // Record which provider actually served the audio, so the UI can show it and
-      // so a track played via a fallback is not mistaken for its own provider.
-      setPlaybackProvider(source);
+      playTrackRef.current(landing);
+      return true;
+    },
+    [setCurrentIndex]
+  );
 
-      // Add to recently played
-      addToRecentlyPlayed(track);
-    } catch (error) {
-      console.error('Failed to play track:', error);
-      setIsLoading(false);
-      setIsPlaying(false);
-      // Try next track
-      next();
+  /**
+   * What happens when a track reaches its end.
+   *
+   * This is the auto-advance. Repeat-one replays the same audio rather than
+   * re-resolving it, so looping costs no request. Otherwise the queue advances,
+   * and an exhausted queue with repeat off simply stops — which is why this never
+   * reports an error.
+   *
+   * Stable across renders: `advance` is stable because the only thing it depends
+   * on is a state setter, so a Howl built early still holds a current callback.
+   */
+  const handleTrackEnd = useCallback(() => {
+    if (repeatRef.current === 'track') {
+      howlRef.current?.seek(0);
+      howlRef.current?.play();
+      return;
     }
-  }
+
+    advance(1);
+  }, [advance]);
+
+  // Load and play track
+  const playTrack = useCallback(
+    async (track) => {
+      if (!track?.id) return;
+
+      teardown();
+
+      setIsLoading(true);
+      // A new attempt clears the previous failure rather than stacking a second
+      // toast behind it.
+      setPlaybackError(null);
+      setCurrentTrack(track);
+      setPosition(0);
+      setDuration(0);
+      trackRef.current = track;
+
+      // Seat the queue position on the track being started.
+      //
+      // Every shelf replaces the queue and then asks for one of its tracks, but
+      // nothing told the queue which one. The index therefore kept whatever value
+      // the previous list left behind, so the up-next list highlighted the wrong
+      // row and Previous was dead.
+      //
+      // `seatIndexFor` is asked rather than scanning a mirrored queue, because a
+      // shelf calls `setQueue(items)` and `playTrack(item)` in the same handler —
+      // at that point React has not committed the new queue yet.
+      const seat = seatIndexFor ? seatIndexFor(track) : -1;
+      if (seat !== -1 && seat !== indexRef.current) {
+        indexRef.current = seat;
+        setCurrentIndex(seat);
+      }
+
+      try {
+        const { streamUrl, source } = await resolveStream(track);
+
+        await playProgressive(streamUrl, volumeRef.current, handleTrackEnd);
+
+        // Record which provider actually served the audio, so the UI can show it and
+        // so a track played via a fallback is not mistaken for its own provider.
+        setPlaybackProvider(source);
+
+        // Add to recently played
+        addToRecentlyPlayed(track);
+      } catch (error) {
+        console.error('Failed to play track:', error);
+        setIsLoading(false);
+        setIsPlaying(false);
+        // Surfaced rather than swallowed: the old behaviour called `next()` here,
+        // which moved the queue on without playing anything and left the listener
+        // with silence and no explanation.
+        setPlaybackError(describePlaybackFailure(error, track));
+      }
+    },
+    [
+      teardown,
+      resolveStream,
+      playProgressive,
+      handleTrackEnd,
+      addToRecentlyPlayed,
+      setCurrentIndex,
+      seatIndexFor,
+    ]
+  );
+
+  // `advance` and `playQueueIndex` are stable callbacks that must reach the
+  // current `playTrack` without depending on it, which would otherwise be a
+  // dependency cycle: playTrack depends on handleTrackEnd, which depends on
+  // advance. The ref breaks it and keeps both of them referentially stable.
+  useEffect(() => {
+    playTrackRef.current = playTrack;
+  }, [playTrack]);
+
+  const next = useCallback(() => advance(1), [advance]);
+  const previous = useCallback(() => advance(-1), [advance]);
+
+  /** Play a specific queue row, keeping the queue position in step with it. */
+  const playQueueIndex = useCallback(
+    (index) => {
+      const track = queueRef.current[index];
+      if (!track) return;
+
+      indexRef.current = index;
+      setCurrentIndex(index);
+      playTrackRef.current(track);
+    },
+    [setCurrentIndex]
+  );
 
   function play() {
-    howlRef.current?.play();
+    const howl = howlRef.current;
+    if (!howl) return;
+
+    // Howler resumes from the playhead, and a finished track is left sitting at
+    // its own duration — so pressing play after a track ends re-fires `onend`
+    // instead of playing anything. Rewind first.
+    const total = howl.duration();
+    if (total && howl.seek() >= total - 0.25) {
+      howl.seek(0);
+      setPosition(0);
+    }
+
+    howl.play();
   }
 
   function pause() {
@@ -185,8 +374,14 @@ export function PlayerProvider({ children }) {
   }
 
   function seek(seconds) {
-    howlRef.current?.seek(seconds);
-    setPosition(seconds);
+    const howl = howlRef.current;
+    if (!howl) return;
+
+    const total = howl.duration();
+    const clamped = Math.max(0, total ? Math.min(seconds, total) : seconds);
+
+    howl.seek(clamped);
+    setPosition(clamped);
   }
 
   function changeVolume(value) {
@@ -196,11 +391,14 @@ export function PlayerProvider({ children }) {
     localStorage.setItem('volume', clamped);
   }
 
+  const dismissPlaybackError = useCallback(() => setPlaybackError(null), []);
+
   // Load saved volume
   useEffect(() => {
     const savedVolume = localStorage.getItem('volume');
     if (savedVolume) {
-      setVolume(parseFloat(savedVolume));
+      const parsed = parseFloat(savedVolume);
+      if (Number.isFinite(parsed)) setVolume(parsed);
     }
   }, []);
 
@@ -222,7 +420,15 @@ export function PlayerProvider({ children }) {
         duration,
         /** Provider that actually served the audio; may differ from the track's source. */
         playbackProvider,
+        /** Last playback failure, or null. Dismissed on retry or a new track. */
+        playbackError,
+        dismissPlaybackError,
         playTrack,
+        /** Skip to the neighbouring track and play it; false at the queue edge. */
+        next,
+        previous,
+        /** Play one queue row by index. */
+        playQueueIndex,
         play,
         pause,
         seek,

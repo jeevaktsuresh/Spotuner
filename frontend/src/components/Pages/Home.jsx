@@ -5,6 +5,7 @@ import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import useShelves from '../../hooks/useShelves';
 import SectionHeading from '../Layout/SectionHeading';
+import ShelfRow from '../Layout/ShelfRow';
 import HeroCarousel from '../Cards/HeroCarousel';
 import QuickCard from '../Cards/QuickCard';
 import QuickPick from '../Cards/QuickPick';
@@ -48,7 +49,7 @@ const HERO_COPY = [
 
 function ShelfSkeleton() {
   return (
-    <div className="flex gap-4">
+    <ShelfRow>
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="w-[186px] shrink-0">
           <div className="aspect-[1.66] w-full animate-pulse rounded-[10px] bg-white/[0.05]" />
@@ -56,7 +57,7 @@ function ShelfSkeleton() {
           <div className="mt-1.5 h-3 w-1/2 animate-pulse rounded bg-white/[0.05]" />
         </div>
       ))}
-    </div>
+    </ShelfRow>
   );
 }
 
@@ -195,7 +196,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="px-5 py-6 md:px-7">
+      <div className="page-shell">
         <div className="h-[286px] w-full animate-pulse rounded-[16px] bg-white/[0.05]" />
         <div className="mt-9">
           <ShelfSkeleton />
@@ -205,7 +206,7 @@ export default function Home() {
   }
 
   return (
-    <div className="px-5 pb-8 pt-6 md:px-7">
+    <div className="page-shell">
 {/* ===== Hero ===== */}
       {enrichedSlides.length > 0 ? (
         <HeroCarousel
@@ -222,7 +223,7 @@ export default function Home() {
         <section className="mt-9">
           <SectionHeading title={greeting()} seeAllTo="/browse" />
 
-          <div className="shelf-x scrollbar-hide flex gap-3.5 pb-1">
+          <ShelfRow gap="gap-3.5">
             {quickPicks.map(({ title, subtitle, track, card }) => {
               // Playing a card queues that card's own recommended tracks, so
               // the queue reflects the algorithm's output rather than the
@@ -246,7 +247,7 @@ export default function Home() {
                 />
               );
             })}
-          </div>
+          </ShelfRow>
         </section>
       ) : null}
 
@@ -255,7 +256,7 @@ export default function Home() {
         <section className="mt-9">
           <SectionHeading title="Quick Picks" seeAllTo="/browse" />
 
-          <div className="shelf-x scrollbar-hide flex gap-3.5 pb-1">
+          <ShelfRow gap="gap-3.5">
             {quickPickTracks.slice(0, 8).map((track) => (
               <QuickPick
                 key={`${track.source ?? 'yt'}-${track.id}`}
@@ -267,7 +268,7 @@ export default function Home() {
                 onPlay={() => play(quickPickTracks, track)}
               />
             ))}
-          </div>
+          </ShelfRow>
         </section>
       ) : null}
 
@@ -276,7 +277,7 @@ export default function Home() {
         <section className="mt-9">
           <SectionHeading title="Trending Now" seeAllTo="/browse" />
 
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {trending.map((track, i) => (
               <RankedCard
                 key={`${track.source ?? 'yt'}-${track.id}`}
@@ -289,7 +290,7 @@ export default function Home() {
                 onPlay={() => play(trending, track)}
               />
             ))}
-          </div>
+          </ShelfRow>
         </section>
       ) : null}
 
@@ -298,7 +299,7 @@ export default function Home() {
         <section className="mt-9">
           <SectionHeading title="Latest Releases" seeAllTo="/browse" />
 
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {latest.map((track) => (
               <MediaCard
                 key={`${track.source ?? 'yt'}-${track.id}`}
@@ -310,7 +311,7 @@ export default function Home() {
                 onPlay={() => play(latest, track)}
               />
             ))}
-          </div>
+          </ShelfRow>
         </section>
       ) : null}
 
@@ -319,7 +320,7 @@ export default function Home() {
         <SectionHeading title="Recently Played" seeAllTo="/library" />
 
         {recent.length > 0 ? (
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {recent.map((track) => (
               <MediaCard
                 key={`${track.source ?? 'yt'}-${track.id}`}
@@ -331,7 +332,7 @@ export default function Home() {
                 onPlay={() => play(recent, track)}
               />
             ))}
-          </div>
+          </ShelfRow>
         ) : (
           <EmptyRow
             message="Nothing played yet"
@@ -347,7 +348,7 @@ export default function Home() {
         <section key={row.id} className="mt-9">
           <SectionHeading title={row.title} seeAllTo="/browse" />
 
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {row.tracks.map((track) => (
               <WideCard
                 key={`${track.source ?? 'yt'}-${track.id}`}
@@ -359,7 +360,7 @@ export default function Home() {
                 onPlay={() => play(row.tracks, track)}
               />
             ))}
-          </div>
+          </ShelfRow>
         </section>
       ))}
 
@@ -368,7 +369,7 @@ export default function Home() {
         <section className="mt-9">
           <SectionHeading title="Your Playlists" seeAllTo="/playlists" />
 
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {playlists.slice(0, 8).map((playlist) => (
               <Link
                 key={playlist.id}
@@ -392,12 +393,12 @@ export default function Home() {
                 <p className="clamp-1 mt-2.5 text-[12.5px] font-semibold text-white">
                   {playlist.name}
                 </p>
-                <p className="text-[11.5px] text-label-secondary">
+<p className="text-[11.5px] text-label-secondary">
                   {playlist.tracks.length} song{playlist.tracks.length === 1 ? '' : 's'}
                 </p>
               </Link>
             ))}
-          </div>
+          </ShelfRow>
         </section>
       ) : null}
 

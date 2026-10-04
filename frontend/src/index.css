@@ -43,6 +43,29 @@
 
   --radius-card: 14px;
   --radius-tile: 10px;
+
+  /* ===== Layout scale =====
+     One horizontal spacing system, read by every page through `.page-shell`.
+
+     `--gutter` is the single inset between the content column and the edge of
+     the window. The page shell, the chrome bars and the horizontal shelf bleeds
+     all resolve it, so a heading can never sit at a different margin than the
+     row underneath it. The steps are overridden per breakpoint in `@layer base`,
+     because a `@theme` value cannot carry a media query.
+
+     `--page-max` caps the measure on very wide monitors. Without it a 2560px
+     window stretches a five-column card grid to more than twice the width it was
+     designed for and the rows read as a strip of postage stamps.
+
+     `--chrome-player` and `--chrome-nav` are the heights of the two bottom bars.
+     They are variables rather than Tailwind heights because the overlays that
+     have to clear them — the playback error toast, the queue sheet — need the
+     same numbers, and two hard-coded heights are exactly how a toast ends up
+     sitting on top of the player it is meant to report about. */
+  --gutter: 1rem;
+  --page-max: 1560px;
+  --chrome-player: 4rem;
+  --chrome-nav: 3.5rem;
 }
 
 @layer base {
@@ -97,6 +120,46 @@
     outline-offset: 2px;
   }
 
+  /* ===== Layout scale, stepped per breakpoint =====
+     Declared here rather than in `@theme` because these are the half that has to
+     respond to the viewport. Written as `:root` so they beat the `@theme`
+     defaults above regardless of layer order.
+
+     The gutter grows with the window rather than switching abruptly, which is
+     what stops a 320px phone and a 1280px laptop from feeling like the same app
+     stretched: the phone gets a 16px inset, the desktop a 32px one. */
+  :root {
+    --gutter: 1rem;
+    --chrome-player: 4rem;
+  }
+
+  @media (min-width: 480px) {
+    :root {
+      --gutter: 1.25rem;
+    }
+  }
+
+  @media (min-width: 640px) {
+    :root {
+      --gutter: 1.5rem;
+      --chrome-player: 4.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    :root {
+      /* The sidebar rail is docked from here, so the bottom nav is display:none
+         and must not reserve height either — the toast offset reads this. */
+      --chrome-nav: 0px;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    :root {
+      --gutter: 2rem;
+    }
+  }
+
   /* Respect reduced-motion: collapse every decorative transition rather than
      trying to enumerate each animated component. */
   @media (prefers-reduced-motion: reduce) {
@@ -112,6 +175,22 @@
 }
 
 @layer components {
+  /* ===== The page shell ==================================================
+     The one page layout in the app: a capped, centred measure with the shared
+     gutter on both sides and a consistent vertical rhythm.
+
+     Every page root is this and only this. Pages are plain documents inside
+     `main`, which is the app's only vertical scroller, so a page must never
+     bring its own `overflow` — that is what produced nested scroll containers
+     where the outer pane scrolled a few pixels and the wheel appeared dead. */
+  .page-shell {
+    width: 100%;
+    max-width: var(--page-max);
+    margin-inline: auto;
+    padding-inline: var(--gutter);
+    padding-block: 1.5rem 2rem;
+  }
+
   /* Vertical scroll container for the main region */
   .scrollable {
     overflow-y: auto;
@@ -208,28 +287,14 @@
     user-select: none;
   }
 
-  /* Horizontal shelf row: bleeds to the viewport edge on small screens so the
-     scroll affordance reads as a carousel rather than a clipped grid. */
+  /* Horizontal shelf row: bleeds past the page gutter so the scroll affordance
+     reads as a carousel rather than a clipped grid. Derived from `--gutter`, so
+     the first and last card line up with the heading above them at every
+     breakpoint instead of drifting out of alignment when the gutter steps up. */
   .row-bleed {
-    margin-inline: -1rem;
-    padding-inline: 1rem;
-    scroll-padding-inline: 1rem;
-  }
-
-  @media (min-width: 768px) {
-    .row-bleed {
-      margin-inline: -2rem;
-      padding-inline: 2rem;
-      scroll-padding-inline: 2rem;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .row-bleed {
-      margin-inline: -2.5rem;
-      padding-inline: 2.5rem;
-      scroll-padding-inline: 2.5rem;
-    }
+    margin-inline: calc(-1 * var(--gutter));
+    padding-inline: var(--gutter);
+    scroll-padding-inline: var(--gutter);
   }
 }
 
@@ -250,4 +315,72 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
+}
+
+/* ===== Touch input ==========================================================
+
+   Every play control in the app is revealed by hover. A touch device never
+   produces a hover, so those controls sit at `opacity: 0` forever: the cards
+   look complete and cannot be started, and a dense row exposes no target at all
+   because its only control is the hover overlay. These rules leave the reveal
+   exactly as it is wherever hover exists and make it permanent where it does not.
+
+   Declared outside `@layer` deliberately. Tailwind's utilities live in
+   `@layer utilities`, and an unlayered rule outranks every layered rule whatever
+   its specificity — which is what lets this override `opacity-0`, `bg-black/45`
+   and `group-hover:opacity-100` without editing those utilities at each of the
+   dozen call sites, and without a `!important` anywhere.
+
+   `@media (hover: none)` is the signal that a device cannot hover. A laptop with
+   a touchscreen still reports `hover: hover` when a mouse is attached, so it
+   keeps the pointer treatment rather than being permanently flattened.
+   ========================================================================== */
+
+@media (hover: none) {
+  /* Corner play buttons. No entrance motion — there is nothing to reveal them. */
+  .play-reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The scrim behind a corner glyph exists to keep it legible over artwork.
+     Kept, but lighter: at 55% a permanent scrim would darken every row. */
+  .art-scrim {
+    background-color: rgb(0 0 0 / 0.35);
+  }
+
+  /* Full-bleed card overlay. The wash is dropped so a permanently visible
+     control does not permanently darken the card, and the glyph moves to the
+     corner to match every other card. The control still covers the whole card,
+     so the card itself remains tappable. */
+  .play-overlay {
+    opacity: 1;
+    background-color: transparent;
+    place-items: end;
+    padding: 0.5rem;
+  }
+
+  /* Secondary icon actions that fade in on hover ("...", remove from queue). */
+  .tap-reveal {
+    opacity: 1;
+  }
+
+  /* Touch targets. A 28-36px glyph is hard to hit accurately; 40px is about the
+     smallest that is reliably tappable without overflowing a 152px card. */
+  .touch-target {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* A list row becomes the primary target rather than one corner of it, so it
+     gets the recommended minimum height, a pressed state — which a hover-only
+     design never had — and no tap-highlight flash. */
+  .tap-row {
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .tap-row:active {
+    background-color: rgb(255 255 255 / 0.06);
+  }
 }

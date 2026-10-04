@@ -3,6 +3,7 @@ import { Radio as RadioIcon } from 'lucide-react';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import useShelves from '../../hooks/useShelves';
+import PageShell from '../Layout/PageShell';
 import Shelf from '../Layout/Shelf';
 import SectionHeading from '../Layout/SectionHeading';
 import SquareLockup from '../Cards/SquareLockup';
@@ -50,22 +51,11 @@ export default function Radio() {
   }
 
   return (
-    <div className="scrollable flex-1 px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-7">
-        <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-          Radio
-        </h1>
-        <p className="mt-1.5 text-[13px] text-label-secondary">
-          Non-stop stations tuned to your taste.
-        </p>
-      </header>
-
+    <PageShell title="Radio" description="Non-stop stations tuned to your taste.">
       {loading ? (
-        <div className="mt-6 px-4 md:px-8 lg:px-10">
-          <div className="h-7 w-40 animate-pulse rounded bg-white/5" />
-        </div>
+        <div className="h-7 w-40 animate-pulse rounded bg-white/5" />
       ) : error || shelves.length === 0 ? (
-        <div className="px-5 py-24 text-center md:px-7">
+        <div className="py-24 text-center">
           <RadioIcon size={30} className="mx-auto mb-4 text-white/20" />
           <p className="text-[14px] font-medium text-white/85">Couldn't load stations right now</p>
           <p className="mt-1.5 text-[13px] text-label-secondary">
@@ -110,6 +100,6 @@ export default function Radio() {
           ) : null}
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

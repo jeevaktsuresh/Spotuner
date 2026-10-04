@@ -3,6 +3,7 @@ import { Heart, ListMusic, Music, Plus, X } from 'lucide-react';
 import { useLibrary } from '../../context/LibraryContext';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
+import PageShell from '../Layout/PageShell';
 import TrackCard from '../Cards/TrackCard';
 
 const TABS = [
@@ -41,17 +42,10 @@ export default function Library() {
   }
 
   return (
-    <div className="scrollable flex-1 px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-            Your Library
-          </h1>
-          <p className="mt-1.5 text-[13px] text-label-secondary">
-            Everything you've saved, in one place.
-          </p>
-        </div>
-
+    <PageShell
+      title="Your Library"
+      description="Everything you've saved, in one place."
+      actions={
         <button
           type="button"
           onClick={() => setShowCreateModal(true)}
@@ -60,8 +54,8 @@ export default function Library() {
           <Plus size={16} />
           New Playlist
         </button>
-      </header>
-
+      }
+    >
       {/* Tabs */}
       <div className="mb-6 flex flex-wrap gap-2">
         {TABS.map(({ id, label, Icon }) => (
@@ -208,7 +202,7 @@ export default function Library() {
           </div>
         </div>
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

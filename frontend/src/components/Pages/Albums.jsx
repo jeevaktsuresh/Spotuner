@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import useShelves from '../../hooks/useShelves';
+import PageShell from '../Layout/PageShell';
 import SectionHeading from '../Layout/SectionHeading';
 import Artwork from '../Artwork/Artwork';
 import { Play, Pause } from 'lucide-react';
@@ -35,16 +36,7 @@ export default function Albums() {
   }
 
   return (
-    <div className="px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-7">
-        <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-          Albums
-        </h1>
-        <p className="mt-1.5 text-[13px] text-label-secondary">
-          Collections from your library
-        </p>
-      </header>
-
+    <PageShell title="Albums" description="Collections from your library">
       {loading ? (
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {Array.from({ length: 10 }).map((_, i) => (
@@ -81,8 +73,9 @@ export default function Albums() {
                     <button
                       type="button"
                       onClick={() => play(row.tracks, track)}
-                      aria-label={`Play ${track.title}`}
-                      className="absolute bottom-2.5 right-2.5 grid h-9 w-9 place-items-center rounded-full bg-accent text-white opacity-0 shadow-lg transition-all duration-200 hover:scale-105 group-hover:opacity-100 group-focus-within:opacity-100"
+                      aria-label={`${isThisPlaying(track) ? 'Pause' : 'Play'} ${track.title}`}
+                      aria-pressed={isThisPlaying(track)}
+                      className="play-reveal touch-target absolute bottom-2.5 right-2.5 grid h-9 w-9 place-items-center rounded-full bg-accent text-white shadow-lg transition-all duration-200 hover:scale-105"
                     >
                       {isThisPlaying(track) ? (
                         <Pause size={15} fill="currentColor" />
@@ -108,6 +101,6 @@ export default function Albums() {
           </section>
         ))
       )}
-    </div>
+    </PageShell>
   );
 }

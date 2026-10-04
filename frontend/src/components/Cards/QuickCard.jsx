@@ -42,12 +42,14 @@ export default function QuickCard({
           ) : null}
         </div>
 
-        {/* Play control */}
+        {/* Play control. Always visible already; `touch-target` widens the hit area
+            from 32px to 40px on devices without hover. */}
         <button
           type="button"
           onClick={onPlay}
-          aria-label={`Play ${title}`}
-          className="absolute bottom-2.5 right-2.5 grid h-8 w-8 place-items-center rounded-full bg-white/95 text-black shadow-[0_2px_10px_rgba(0,0,0,0.5)] transition-all duration-200 hover:scale-105"
+          aria-label={`${isPlaying ? 'Pause' : 'Play'} ${title}`}
+          aria-pressed={isPlaying}
+          className="touch-target absolute bottom-2.5 right-2.5 grid h-8 w-8 place-items-center rounded-full bg-white/95 text-black shadow-[0_2px_10px_rgba(0,0,0,0.5)] transition-all duration-200 hover:scale-105"
         >
           {isLoading ? (
             <Loader2 size={14} className="animate-spin" />

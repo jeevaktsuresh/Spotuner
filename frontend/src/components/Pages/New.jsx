@@ -3,6 +3,7 @@ import { useLibrary } from '../../context/LibraryContext';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import useShelves from '../../hooks/useShelves';
+import ShelfRow from '../Layout/ShelfRow';
 import Shelf from '../Layout/Shelf';
 import SectionHeading from '../Layout/SectionHeading';
 import HeroCard from '../Cards/HeroCard';
@@ -11,18 +12,15 @@ import TrackLockup from '../Cards/TrackLockup';
 
 function ShelfSkeleton() {
   return (
-    <div className="px-4 md:px-8 lg:px-10">
-      <div className="h-7 w-40 animate-pulse rounded bg-white/5" />
-      <div className="mt-4 flex gap-4">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="w-[160px] shrink-0 sm:w-[184px]">
-            <div className="aspect-square w-full animate-pulse rounded-[12px] bg-white/5" />
-            <div className="mt-2.5 h-3 w-3/4 animate-pulse rounded bg-white/5" />
-            <div className="mt-1.5 h-3 w-1/2 animate-pulse rounded bg-white/5" />
-          </div>
-        ))}
-      </div>
-    </div>
+    <ShelfRow>
+      {Array.from({ length: 7 }).map((_, i) => (
+        <div key={i} className="w-[160px] shrink-0 sm:w-[184px]">
+          <div className="aspect-square w-full animate-pulse rounded-[12px] bg-white/5" />
+          <div className="mt-2.5 h-3 w-3/4 animate-pulse rounded bg-white/5" />
+          <div className="mt-1.5 h-3 w-1/2 animate-pulse rounded bg-white/5" />
+        </div>
+      ))}
+    </ShelfRow>
   );
 }
 
@@ -59,10 +57,8 @@ export default function NewPage() {
 
   if (loading) {
     return (
-      <div className="scrollable flex-1 pb-10 pt-7">
-        <div className="px-4 md:px-8 lg:px-10">
-          <div className="h-9 w-48 animate-pulse rounded bg-white/5" />
-        </div>
+      <div className="page-shell">
+        <div className="h-9 w-48 animate-pulse rounded bg-white/5" />
         <div className="mt-8">
           <ShelfSkeleton />
         </div>
@@ -72,7 +68,7 @@ export default function NewPage() {
 
   if (error || shelves.length === 0) {
     return (
-      <div className="scrollable flex-1 px-4 py-24 text-center md:px-8 lg:px-10">
+      <div className="page-shell py-24 text-center">
         <p className="text-[15px] font-medium text-white/80">Couldn't load music right now</p>
         <p className="mt-1.5 text-[13px] text-label-secondary">
           The backend needs to be running on port 3001.
@@ -82,18 +78,18 @@ export default function NewPage() {
   }
 
   return (
-    <div className="scrollable flex-1 pb-6">
-      <header className="px-4 pb-2 pt-7 md:px-8 md:pt-9 lg:px-10">
-        <h1 className="text-[28px] font-bold leading-none tracking-tight text-white md:text-[36px]">
+    <div className="page-shell">
+      <header className="pb-2">
+        <h1 className="text-[26px] font-bold leading-none tracking-tight text-white sm:text-[30px]">
           New
         </h1>
-        <p className="mt-2 text-[14px] text-label-secondary md:text-[15px]">
+        <p className="mt-2 text-[13px] text-label-secondary">
           The latest releases, updated every week.
         </p>
       </header>
 
       {featuredTrack ? (
-        <section className="mb-11 mt-6 px-4 md:px-8 lg:px-10">
+        <section className="mb-11 mt-6">
           <HeroCard
             title={featuredTrack.title}
             subtitle={featuredTrack.artist}
@@ -108,7 +104,7 @@ export default function NewPage() {
 
       {/* Newest songs as dense rows — grid columns, not a carousel */}
       {bestNew ? (
-        <section className="mb-10 px-4 md:px-8 lg:px-10">
+        <section className="mb-10">
           <SectionHeading title={bestNew.title} subtitle="Just landed" />
 
           <div className="grid gap-y-1 min-[660px]:grid-cols-2 min-[1320px]:grid-cols-3">
@@ -157,7 +153,7 @@ export default function NewPage() {
         </Shelf>
       ))}
 
-      <footer className="mt-8 border-t border-white/[0.07] px-4 py-8 md:px-8 lg:px-10">
+      <footer className="mt-8 border-t border-white/[0.07] py-8">
         <p className="text-[11px] leading-relaxed text-label-tertiary">
           Music sourced from YouTube Music. Playlists and albums are YouTube searches.
         </p>

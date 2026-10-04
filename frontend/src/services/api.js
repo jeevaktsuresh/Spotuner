@@ -6,15 +6,20 @@ const DEV_API_ORIGIN = 'http://localhost:3001';
 /**
  * Last-resort origin for a production build that has no `VITE_API_URL`.
  *
- * Production is expected to set `VITE_API_URL` in the Vercel project settings, and
- * that value always wins. This exists for one specific failure mode: a production
- * build with the variable unset would otherwise fall back to `localhost:3001` and
- * ship a site that silently calls the visitor's own machine — every request fails,
- * and because there is no server there to answer, the browser reports it as a CORS
- * error with no obvious cause. Pointing at the real backend instead turns that into
- * an ordinary network error, and the console.error below names the actual mistake.
+ * The deployment is self-hosted: one process serves the bundle and proxies `/api` to
+ * the backend, so the correct production default is same-origin. `VITE_API_URL=/`
+ * states that explicitly and is what the build uses; this is the value that makes a
+ * build without it behave identically instead of diverging.
+ *
+ * It deliberately does not name a host. A relative origin is correct from every
+ * hostname the box is reachable under — a LAN IP, a hostname, whatever a reverse
+ * proxy in front of it is called — and it cannot rot. The previous fallback was the
+ * Cloudflare Worker's hostname, so a build that lost `VITE_API_URL` shipped a site
+ * that quietly called a deployment this project no longer uses, and a
+ * `localhost:3001` fallback would have shipped one calling the visitor's own machine,
+ * which fails as a CORS error with no obvious cause.
  */
-const PROD_API_ORIGIN = 'https://spotuner-api.jeevak3358.workers.dev';
+const PROD_API_ORIGIN = '/';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL;
 
@@ -22,9 +27,10 @@ const API_URL =
   configuredApiUrl || (import.meta.env.DEV ? DEV_API_ORIGIN : PROD_API_ORIGIN);
 
 if (!configuredApiUrl && !import.meta.env.DEV) {
-  console.error(
-    `[spotuner] VITE_API_URL is not set in this production build; falling back to ${PROD_API_ORIGIN}. ` +
-      'Set VITE_API_URL in the Vercel project settings.',
+  console.warn(
+    `[spotuner] VITE_API_URL is not set in this production build; using the same-origin default ` +
+      `(${PROD_API_ORIGIN}). That is correct for the self-hosted deployment, which serves the API ` +
+      'behind the same origin as the bundle.',
   );
 }
 

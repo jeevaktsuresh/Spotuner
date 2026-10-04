@@ -36,12 +36,17 @@ export default function MediaCard({
           sizes="186px"
         />
 
-        {/* Play overlay, revealed on hover */}
+        {/* Play overlay, revealed on hover.
+            `play-overlay` is what keeps it reachable without a pointer: on touch
+            the wash is dropped and the glyph moves to the bottom-right corner, so
+            a permanent control does not permanently dim the artwork. The control
+            still covers the whole card, so the card itself stays tappable. */}
         <button
           type="button"
           onClick={onPlay}
-          aria-label={`Play ${title}`}
-          className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+          aria-label={`${isPlaying ? 'Pause' : 'Play'} ${title}`}
+          aria-pressed={isPlaying}
+          className="play-overlay absolute inset-0 grid place-items-center bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
         >
           <span className="grid h-10 w-10 place-items-center rounded-full bg-accent text-white shadow-[0_4px_14px_rgba(0,0,0,0.5)] transition-transform duration-200 group-hover:scale-105">
             {isPlaying ? (
@@ -72,10 +77,12 @@ export default function MediaCard({
           ) : null}
         </div>
 
+        {/* `tap-reveal` so the secondary action is reachable on touch rather than
+            appearing only on hover. */}
         <button
           type="button"
           aria-label={`More options for ${title}`}
-          className="-mr-1 shrink-0 rounded-full p-1 text-label-secondary opacity-0 t-global hover:text-white group-hover:opacity-100 group-focus-within:opacity-100"
+          className="tap-reveal -mr-1 shrink-0 rounded-full p-1 text-label-secondary opacity-0 t-global hover:text-white group-hover:opacity-100 group-focus-within:opacity-100"
         >
           <MoreHorizontal size={16} />
         </button>

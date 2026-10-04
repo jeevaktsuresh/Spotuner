@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -88,10 +89,28 @@ function NavRow({ to, label, Icon, isActive, onClick }) {
  * Three stacked groups matching the reference: primary nav, "YOUR LIBRARY",
  * and "PLAYLISTS" with a live list from LibraryContext. Below `lg` the whole
  * rail becomes an off-canvas drawer driven by `open`.
+ *
+ * ## Accessibility of the drawer
+ *
+ * A closed drawer is translated off-screen but still in the document, so it is
+ * still in the tab order and still in the accessibility tree: a keyboard user
+ * could Tab straight into a set of links they could not see. It is therefore
+ * `inert` while closed, which removes both problems at once.
+ *
+ * Escape is handled in App, alongside the queue sheet, so that one press closes
+ * exactly one layer rather than every listener reacting at once. Focus enters
+ * the drawer on its close button and App returns it to the trigger on the way
+ * out.
  */
 export default function Sidebar({ open = false, onClose }) {
   const location = useLocation();
   const { playlists, recentlyPlayed } = useLibrary();
+
+  const closeButtonRef = useRef(null);
+
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [open]);
 
   const isActive = (path) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -103,22 +122,27 @@ export default function Sidebar({ open = false, onClose }) {
 
   const recentPlaylists = playlists.slice(0, 6);
 
-  const body = (
-    <nav className="flex min-h-0 flex-1 flex-col">
-      {/* Wordmark */}
+  const body = (variant) => (
+    <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
+      {/* Wordmark. Deliberately on the rail's own `px-5` rhythm rather than the
+          page `--gutter`: this is chrome, not a page, and indenting it further
+          than the nav rows below it would break the rail's hierarchy. */}
       <div className="flex h-[72px] shrink-0 items-center justify-between px-5">
         <Link to="/" aria-label="Spotuner home" onClick={onClose}>
           <SpotunerBrand />
         </Link>
 
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close navigation"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-label-secondary t-global hover:bg-white/10 hover:text-white lg:hidden"
-        >
-          <X size={18} />
-        </button>
+        {variant === 'drawer' ? (
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-label-secondary t-global hover:bg-white/10 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        ) : null}
       </div>
 
       <div className="scrollbar-hide flex-1 overflow-y-auto px-4 pb-6">
@@ -192,28 +216,41 @@ export default function Sidebar({ open = false, onClose }) {
 
   return (
     <>
-      {/* Desktop rail */}
+      {/* Desktop rail. `hidden` takes it out of the tab order too, so the two
+          copies of this body never compete for focus. */}
       <aside className="hidden h-full w-[245px] shrink-0 flex-col bg-surface-nav lg:flex">
-        {body}
+        {body('rail')}
       </aside>
 
       {/* Mobile drawer */}
       <div
+        id="site-navigation-drawer"
         className={`fixed inset-0 z-[9905] lg:hidden ${open ? '' : 'pointer-events-none'}`}
-        aria-hidden={!open}
+        // Boolean, not the `inert=""` presence idiom. React serialises `inert` as
+        // a boolean attribute, and an empty string is falsy there, so
+        // `inert={open ? undefined : ''}` compiles to a removed attribute and the
+        // off-screen drawer stays in the tab order.
+        inert={!open}
       >
         <div
           onClick={onClose}
+          aria-hidden="true"
           className={`absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300 ${
             open ? 'opacity-100' : 'opacity-0'
           }`}
         />
         <aside
+          // While the slide-out transition is still running the panel must not
+          // read as open to assistive tech, so the drawer is named a dialog for
+          // as long as it is on screen — including during the exit animation.
+          role="dialog"
+          aria-modal={open ? true : undefined}
+          aria-label="Navigation"
           className={`absolute inset-y-0 left-0 flex w-[268px] flex-col border-r border-white/[0.06] bg-surface-nav transition-transform duration-300 ease-out ${
             open ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
-          {body}
+          {body('drawer')}
         </aside>
       </div>
     </>

@@ -2,22 +2,10 @@ import { useMemo } from 'react';
 import useShelves from '../../hooks/useShelves';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
+import PageShell from '../Layout/PageShell';
 import SectionHeading from '../Layout/SectionHeading';
+import ShelfRow from '../Layout/ShelfRow';
 import WideCard from '../Cards/WideCard';
-
-function PageShell({ title, description, children }) {
-  return (
-    <div className="px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-7">
-        <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-          {title}
-        </h1>
-        <p className="mt-1.5 text-[13px] text-label-secondary">{description}</p>
-      </header>
-      {children}
-    </div>
-  );
-}
 
 /**
  * Browse — genre-style entry points built from the shelf queries.
@@ -66,19 +54,19 @@ export default function Browse() {
         rows.map((row) => (
           <section key={row.id} className="mb-9">
             <SectionHeading title={row.title} />
-            <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
-              {row.tracks.map((track) => (
-                <WideCard
-                  key={track.id}
-                  title={track.title}
-                  subtitle={track.artist}
-                  image={track.image}
-                  bgColor={track.bgColor}
-                  isPlaying={isThisPlaying(track)}
-                  onPlay={() => play(row.tracks, track)}
-                />
-              ))}
-            </div>
+            <ShelfRow>
+                {row.tracks.map((track) => (
+                  <WideCard
+                    key={track.id}
+                    title={track.title}
+                    subtitle={track.artist}
+                    image={track.image}
+                    bgColor={track.bgColor}
+                    isPlaying={isThisPlaying(track)}
+                    onPlay={() => play(row.tracks, track)}
+                  />
+                ))}
+              </ShelfRow>
           </section>
         ))
       )}

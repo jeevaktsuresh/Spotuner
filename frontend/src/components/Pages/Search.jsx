@@ -7,7 +7,9 @@ import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import { usePreferences } from '../../context/PreferencesContext';
 import MediaCard from '../Cards/MediaCard';
+import PageShell from '../Layout/PageShell';
 import SectionHeading from '../Layout/SectionHeading';
+import ShelfRow from '../Layout/ShelfRow';
 
 export default function Search() {
   const [params] = useSearchParams();
@@ -70,22 +72,14 @@ export default function Search() {
   }
 
   return (
-    <div className="px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-7">
-        <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-          Search
-        </h1>
-        {debouncedQuery ? (
-          <p className="mt-1.5 text-[13px] text-label-secondary">
-            {items.length} result{items.length === 1 ? '' : 's'} for “{debouncedQuery}”
-          </p>
-        ) : (
-          <p className="mt-1.5 text-[13px] text-label-secondary">
-            Find songs, artists, and albums
-          </p>
-        )}
-      </header>
-
+    <PageShell
+      title="Search"
+      description={
+        debouncedQuery
+          ? `${items.length} result${items.length === 1 ? '' : 's'} for “${debouncedQuery}”`
+          : 'Find songs, artists, and albums'
+      }
+    >
       {loading ? (
         <div className="flex items-center gap-3 py-20 text-label-secondary">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-accent" />
@@ -94,7 +88,7 @@ export default function Search() {
       ) : items.length > 0 ? (
         <>
           <SectionHeading title="Top Results" />
-          <div className="shelf-x scrollbar-hide flex gap-4 pb-1">
+          <ShelfRow>
             {items.map((track) => (
               <MediaCard
                 key={`${track.source}-${track.id}`}
@@ -112,7 +106,7 @@ export default function Search() {
                 }
               />
             ))}
-          </div>
+          </ShelfRow>
         </>
       ) : debouncedQuery ? (
         <div className="rounded-[14px] border border-white/[0.06] bg-surface-raised px-6 py-16 text-center">
@@ -133,6 +127,6 @@ export default function Search() {
           </p>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -32,11 +32,14 @@ export default function WideCard({ title, subtitle, image, bgColor = '#1c1822', 
             ) : null}
           </div>
 
+          {/* `play-reveal` keeps this on hover where a pointer exists and makes it
+              permanent on touch; `touch-target` widens the hit area to 40px there. */}
           <button
             type="button"
             onClick={onPlay}
-            aria-label={`Play ${title}`}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-white opacity-0 shadow-[0_4px_14px_rgba(0,0,0,0.5)] transition-all duration-200 group-hover:opacity-100 group-focus-within:opacity-100 hover:scale-105"
+            aria-label={`${isPlaying ? 'Pause' : 'Play'} ${title}`}
+            aria-pressed={isPlaying}
+            className="play-reveal touch-target grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_4px_14px_rgba(0,0,0,0.5)] transition-all duration-200 group-hover:opacity-100 group-focus-within:opacity-100 hover:scale-105"
           >
             {isPlaying ? (
               <Pause size={15} fill="currentColor" />

@@ -1,15 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Search, Bell, Menu } from 'lucide-react';
 
 /**
- * Header — sticky top bar (~68px).
+ * Header — the pinned top bar.
  *
  * Back/forward · wide search field · notification bell · avatar. The field owns
  * a local draft and only pushes to the URL on submit, so the Search page stays
  * the single source of truth for the active query.
+ *
+ * ## Why it is not `position: sticky`
+ *
+ * `main` is the app's only vertical scroller and this bar is a sibling of it,
+ * not an ancestor, so a `sticky top-0` here had nothing to stick to — it was
+ * inert, and the frosted `chrome-blur` treatment had no content passing
+ * underneath it to blur. The bar is pinned the way the frame actually pins it:
+ * a non-shrinking sibling above the scroller. What `sticky` would have given
+ * visually is restored below by tracking the scroller's offset and strengthening
+ * the chrome once content has scrolled beneath the bar.
  */
-export default function Header({ onMenuClick }) {
+export default function Header({ onMenuClick, navOpen = false, menuButtonRef, scroller }) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -25,6 +35,36 @@ export default function Header({ onMenuClick }) {
     setQuery(urlQuery);
   }
 
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    // Null until App's callback ref has captured `main`, which is why the
+    // subscription is keyed on the node rather than mounted once.
+    if (!scroller) return undefined;
+
+    // Sampled on the frame the browser was going to paint anyway, so tracking
+    // the scroll position costs no layout work of its own.
+    let frame = 0;
+
+    function onScroll() {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setScrolled(scroller.scrollTop > 0);
+      });
+    }
+
+    // The scroller is empty on first paint and a later page may restore a
+    // non-zero offset, so the initial state has to be sampled too.
+    setScrolled(scroller.scrollTop > 0);
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      scroller.removeEventListener('scroll', onScroll);
+    };
+  }, [scroller]);
+
   const canGoBack = window.history.length > 1;
 
   function submitSearch(e) {
@@ -33,19 +73,37 @@ export default function Header({ onMenuClick }) {
   }
 
   return (
-    <header className="chrome-blur sticky top-0 z-[9904] flex h-[68px] shrink-0 items-center gap-4 px-5 md:px-7">
-      {/* Mobile: open the navigation drawer */}
+    <header
+      className={[
+        'chrome-blur relative z-[9904] flex h-14 shrink-0 items-center gap-3 px-[var(--gutter)] sm:h-[68px] sm:gap-4',
+        // Only once something is underneath it: a hairline makes the bar read as
+        // a surface floating over the page, which is what a sticky bar should
+        // look like. Unscrolled, the bar is just the top of the document.
+        //
+        // Drawn as a shadow rather than `.hairline-b` because a border would add
+        // a pixel to the bar's height at the exact moment the user starts
+        // scrolling, shifting the whole page under the cursor.
+        scrolled ? 'shadow-[0_1px_0_rgb(255_255_255/0.07)]' : '',
+      ].join(' ')}
+    >
+      {/* Mobile: open the navigation drawer. The bottom nav carries the primary
+          destinations, so this is now the way to the long tail. */}
       <button
+        ref={menuButtonRef}
         type="button"
         onClick={onMenuClick}
         aria-label="Open navigation"
+        aria-expanded={navOpen}
+        aria-controls="site-navigation-drawer"
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-label-secondary t-global hover:bg-white/10 hover:text-white lg:hidden"
       >
         <Menu size={20} />
       </button>
 
-      {/* History controls */}
-      <div className="flex shrink-0 items-center gap-2.5">
+      {/* History controls. Below `sm` the bar has to share its width with the
+          search field, and a phone already has a back gesture and a browser
+          back button; three extra 36px targets bought nothing there. */}
+      <div className="hidden shrink-0 items-center gap-2.5 sm:flex">
         <button
           type="button"
           onClick={() => navigate(-1)}
@@ -66,7 +124,7 @@ export default function Header({ onMenuClick }) {
       </div>
 
       {/* Search */}
-      <form onSubmit={submitSearch} className="relative min-w-0 flex-1 md:max-w-[620px]">
+      <form onSubmit={submitSearch} className="relative min-w-0 flex-1 sm:max-w-[620px]">
         <Search
           size={16}
           className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-label-secondary"
@@ -81,12 +139,12 @@ export default function Header({ onMenuClick }) {
         />
       </form>
 
-      <div className="ml-auto flex shrink-0 items-center gap-4">
+      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
         {/* Notifications */}
         <button
           type="button"
           aria-label="Notifications"
-          className="relative flex h-9 w-9 items-center justify-center rounded-full text-label-secondary t-global hover:bg-white/[0.07] hover:text-white"
+          className="relative hidden h-9 w-9 items-center justify-center rounded-full text-label-secondary t-global hover:bg-white/[0.07] hover:text-white sm:flex"
         >
           <Bell size={19} strokeWidth={2} />
           <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-accent" />

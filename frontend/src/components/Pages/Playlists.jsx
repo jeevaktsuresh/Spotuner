@@ -3,6 +3,7 @@ import { ListMusic, Music, Plus, X, Trash2 } from 'lucide-react';
 import { useLibrary } from '../../context/LibraryContext';
 import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
+import PageShell from '../Layout/PageShell';
 import SectionHeading from '../Layout/SectionHeading';
 import TrackRow from '../Cards/TrackRow';
 
@@ -41,17 +42,10 @@ export default function Playlists() {
   }
 
   return (
-    <div className="scrollable flex-1 px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-            Playlists
-          </h1>
-          <p className="mt-1.5 text-[13px] text-label-secondary">
-            Your own collections, ready to play.
-          </p>
-        </div>
-
+    <PageShell
+      title="Playlists"
+      description="Your own collections, ready to play."
+      actions={
         <button
           type="button"
           onClick={() => setShowCreate((v) => !v)}
@@ -60,8 +54,8 @@ export default function Playlists() {
           <Plus size={16} />
           New Playlist
         </button>
-      </header>
-
+      }
+    >
       {/* Inline create form — avoids a modal for a single text field */}
       {showCreate ? (
         <form
@@ -221,7 +215,7 @@ export default function Playlists() {
           </div>
         </section>
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

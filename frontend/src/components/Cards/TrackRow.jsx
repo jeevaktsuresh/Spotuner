@@ -1,25 +1,45 @@
+import { Play, Pause } from 'lucide-react';
 import Artwork from '../Artwork/Artwork';
-import PlayButton from '../Artwork/PlayButton';
 import { formatDuration } from '../../utils/formatTime';
 
 /**
- * TrackRow — the compact horizontal list item used by Recently Played.
+ * TrackRow — the compact horizontal list item used by Recently Played, artist
+ * song lists and expanded playlists.
  *
- * Thumbnail, title/artist, duration, play button. Rows alternate their surface
- * tint via `index`, which keeps a long list scannable without extra borders.
+ * The row itself is the control. It used to be a plain `<div>` whose only
+ * actionable part was a play button that faded in on hover, which left the row
+ * untappable on a touch device and unreachable by keyboard at any size. As a
+ * button the whole row is one target, it is focusable, and it carries the
+ * accessible name.
+ *
+ * That rules out a nested button, so the play glyph over the thumbnail is
+ * decorative: on pointer devices it still appears on hover exactly as before,
+ * and on touch it is permanent via `play-reveal`.
  */
 export default function TrackRow({ track, index = 0, isPlaying = false, onPlay }) {
   const title = track.title ?? 'Unknown';
   const subtitle = track.artist ?? '';
 
   return (
-    <div
-      className={`group flex items-center gap-3 rounded-[10px] px-2.5 py-2 no-drag t-global hover:bg-white/[0.06] sm:gap-4 sm:px-3 ${
+    <button
+      type="button"
+      onClick={onPlay}
+      aria-label={`${isPlaying ? 'Pause' : 'Play'} ${title}`}
+      className={`tap-row group relative flex w-full items-center gap-3 rounded-[10px] py-2 pl-3 pr-2.5 text-left no-drag t-global hover:bg-white/[0.06] focus-visible:bg-white/[0.06] sm:gap-4 sm:pr-3 ${
         isPlaying ? 'bg-accent-soft' : index % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'
       }`}
     >
+      {/* Accent rail: the currently playing row has to be identifiable at a
+          glance in a long list, and a coloured title alone is easy to miss. */}
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent transition-opacity duration-200 ${
+          isPlaying ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+
       {/* Thumbnail */}
-      <div className="relative shrink-0">
+      <span className="relative shrink-0">
         <Artwork
           src={track.image}
           alt={title}
@@ -29,32 +49,34 @@ export default function TrackRow({ track, index = 0, isPlaying = false, onPlay }
           className="h-10 w-10"
           sizes="40px"
         />
-        <span className="absolute inset-0 flex items-center justify-center rounded-[8px] bg-black/55 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <PlayButton
-            isPlaying={isPlaying}
-            onClick={onPlay}
-            label={`Play ${title}`}
-            className="h-7 w-7 rounded-full bg-accent text-white hover:scale-105"
-            iconClassName="text-white"
-          />
+        <span className="play-reveal art-scrim absolute inset-0 grid place-items-center rounded-[8px] bg-black/55">
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-accent text-white">
+            {isPlaying ? (
+              <Pause size={13} fill="currentColor" />
+            ) : (
+              <Play size={13} fill="currentColor" className="ml-0.5" />
+            )}
+          </span>
         </span>
-      </div>
+      </span>
 
-      {/* Title + artist */}
-      <div className="min-w-0 flex-1">
-        <p
+      {/* Title + artist.
+          No `block` alongside `clamp-1`: both set `display`, and the utility
+          would win and silently drop the line clamp. */}
+      <span className="min-w-0 flex-1">
+        <span
           className={`clamp-1 text-[12.5px] font-medium leading-tight ${
             isPlaying ? 'text-accent' : 'text-white'
           }`}
         >
           {title}
-        </p>
+        </span>
         {subtitle ? (
-          <p className="clamp-1 mt-0.5 text-[11.5px] leading-tight text-label-secondary">
+          <span className="clamp-1 mt-0.5 text-[11.5px] leading-tight text-label-secondary">
             {subtitle}
-          </p>
+          </span>
         ) : null}
-      </div>
+      </span>
 
       {/* Duration — hidden on the narrowest screens to protect the title */}
       {track.duration ? (
@@ -62,6 +84,6 @@ export default function TrackRow({ track, index = 0, isPlaying = false, onPlay }
           {formatDuration(track.duration)}
         </span>
       ) : null}
-    </div>
+    </button>
   );
 }

@@ -3,6 +3,7 @@ import { usePlayer } from '../../context/PlayerContext';
 import { useQueue } from '../../context/QueueContext';
 import useArtists from '../../hooks/useArtists';
 import { artistSlug } from '../../utils/artists';
+import PageShell from '../Layout/PageShell';
 import Artwork from '../Artwork/Artwork';
 import { Play } from 'lucide-react';
 
@@ -30,16 +31,10 @@ export default function Artists() {
   }
 
   return (
-    <div className="px-5 pb-8 pt-6 md:px-7">
-      <header className="mb-7">
-        <h1 className="text-[26px] font-semibold tracking-tight text-white sm:text-[30px]">
-          Artists
-        </h1>
-        <p className="mt-1.5 text-[13px] text-label-secondary">
-          {loading ? 'Loading artists...' : `${artists.length} artists you're listening to`}
-        </p>
-      </header>
-
+    <PageShell
+      title="Artists"
+      description={loading ? 'Loading artists...' : `${artists.length} artists you're listening to`}
+    >
       {loading ? (
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {Array.from({ length: 10 }).map((_, i) => (
@@ -81,12 +76,16 @@ export default function Artists() {
                   </p>
                 </Link>
 
-                {/* Play sits outside the Link so the two are not nested controls. */}
+                {/* Play sits outside the Link so the two are not nested controls.
+                    `play-reveal` keeps the hover behaviour on pointer devices and
+                    makes the control permanent on touch, where a hover-only button
+                    would be unreachable. */}
                 <button
                   type="button"
                   onClick={() => play(artist.tracks, artist.tracks[0])}
-                  aria-label={`Play ${artist.name}`}
-                  className="absolute bottom-[26px] right-1.5 grid h-9 w-9 place-items-center rounded-full bg-accent text-white opacity-0 shadow-lg transition-all duration-200 hover:scale-105 group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`${isThisPlaying(artist.tracks[0]) ? 'Pause' : 'Play'} ${artist.name}`}
+                  aria-pressed={isThisPlaying(artist.tracks[0])}
+                  className="play-reveal touch-target absolute bottom-[26px] right-1.5 grid h-9 w-9 place-items-center rounded-full bg-accent text-white shadow-lg transition-all duration-200 hover:scale-105"
                 >
                   <Play
                     size={14}
@@ -99,6 +98,6 @@ export default function Artists() {
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
