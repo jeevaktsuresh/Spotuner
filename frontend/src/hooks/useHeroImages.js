@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { musicApi } from '../services/api';
 
 /**
@@ -22,6 +22,20 @@ import { musicApi } from '../services/api';
 function slideKey(track) {
   return `${track?.source ?? 'yt'}:${track?.id ?? track?.title ?? 'unknown'}`;
 }
+
+/**
+ * Decoded `Image` objects, keyed by URL and shared across mounts.
+ *
+ * This was a `useRef` on the hook instance, so leaving Home and coming back threw
+ * it away and every hero image was fetched and decoded again — the network hit was
+ * served from the HTTP cache, but the decode and the dominant-colour read were
+ * not. A hero image's pixels never change, so one cache for the app's lifetime is
+ * the correct lifetime.
+ *
+ * Bounded so a long session that browses many pages cannot grow it without limit.
+ */
+const IMAGE_CACHE = new Map();
+const IMAGE_CACHE_MAX = 60;
 
 /** Deterministic placeholder, so slide 0 never flashes an empty box. */
 function placeholderGradient(seed) {
@@ -110,7 +124,6 @@ function toRequest(track) {
 export default function useHeroImages(tracks) {
   const [resolved, setResolved] = useState({});
   const [loading, setLoading] = useState(false);
-  const imageCacheRef = useRef(new Map());
 
   // Signature so a new array identity with identical content does not refetch.
   const signature = (tracks ?? []).map(slideKey).join('|');
@@ -143,13 +156,19 @@ export default function useHeroImages(tracks) {
 
     function loadImage(url) {
       return new Promise((resolve, reject) => {
-        const cached = imageCacheRef.current.get(url);
+        const cached = IMAGE_CACHE.get(url);
         if (cached) return resolve(cached);
 
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-          imageCacheRef.current.set(url, img);
+          // Oldest-first eviction: Map preserves insertion order, and a hero image
+          // is re-requested every few seconds, so the front of the map is the most
+          // likely to be dead.
+          if (IMAGE_CACHE.size >= IMAGE_CACHE_MAX) {
+            IMAGE_CACHE.delete(IMAGE_CACHE.keys().next().value);
+          }
+          IMAGE_CACHE.set(url, img);
           resolve(img);
         };
         img.onerror = () => reject(new Error(`image failed: ${url}`));

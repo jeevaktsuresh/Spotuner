@@ -1,10 +1,26 @@
-import { createContext, useState, useEffect, useRef, useContext, useCallback } from 'react';
+import { createContext, useState, useEffect, useRef, useContext, useCallback, useMemo } from 'react';
 import { Howl } from 'howler';
 import { musicApi } from '../services/api';
 import { QueueContext, stepIndex, NO_INDEX } from './QueueContext';
 import { useLibrary } from './LibraryContext';
 
 const PlayerContext = createContext();
+
+/**
+ * The playback position, on its own, at 100ms resolution.
+ *
+ * This is deliberately a separate context. `position` is re-read from the Howl
+ * ten times a second while a track plays, so any state object that carries it
+ * changes identity ten times a second — and because context propagates by value
+ * identity, that re-rendered *every* consumer: the shelf grids, the search
+ * results, the artist and album rollups, hundreds of card subtrees, on every
+ * tick, none of which display a playhead.
+ *
+ * Keeping it apart means a tick reaches only the components that actually show
+ * progress. `usePlayer` keeps the low-frequency state, which changes when a track
+ * changes rather than ten times a second.
+ */
+const PlayerProgressContext = createContext(0);
 
 /**
  * Turn a thrown value into something worth showing a listener.
@@ -342,7 +358,11 @@ export function PlayerProvider({ children }) {
     [setCurrentIndex]
   );
 
-  function play() {
+  // `useCallback` on all four: they are handed to the transport controls, and a
+  // consumer cannot be memoised while one of its props is a fresh closure. All
+  // four read live playback through refs, so none of them needs a state value and
+  // all four stay stable for the lifetime of the provider.
+  const play = useCallback(() => {
     const howl = howlRef.current;
     if (!howl) return;
 
@@ -356,9 +376,9 @@ export function PlayerProvider({ children }) {
     }
 
     howl.play();
-  }
+  }, []);
 
-  function pause() {
+  const pause = useCallback(() => {
     howlRef.current?.pause();
 
     // Pausing is not the same as skipping: only the latter counts against a
@@ -371,9 +391,9 @@ export function PlayerProvider({ children }) {
         recordCompletion(trackRef.current, heard, false);
       }
     }
-  }
+  }, [recordCompletion]);
 
-  function seek(seconds) {
+  const seek = useCallback((seconds) => {
     const howl = howlRef.current;
     if (!howl) return;
 
@@ -382,14 +402,14 @@ export function PlayerProvider({ children }) {
 
     howl.seek(clamped);
     setPosition(clamped);
-  }
+  }, []);
 
-  function changeVolume(value) {
+  const changeVolume = useCallback((value) => {
     const clamped = Math.max(0, Math.min(1, value));
     setVolume(clamped);
     howlRef.current?.volume(clamped);
     localStorage.setItem('volume', clamped);
-  }
+  }, []);
 
   const dismissPlaybackError = useCallback(() => setPlaybackError(null), []);
 
@@ -409,34 +429,61 @@ export function PlayerProvider({ children }) {
     };
   }, [teardown]);
 
+  /**
+   * The low-frequency player state, memoised.
+   *
+   * `position` is deliberately absent — see `PlayerProgressContext`. What remains
+   * changes when a track starts, stops or fails, not ten times a second, so this
+   * object holds its identity across a position tick and no consumer re-renders
+   * because the playhead moved.
+   */
+  const value = useMemo(
+    () => ({
+      currentTrack,
+      isPlaying,
+      isLoading,
+      volume,
+      duration,
+      /** Provider that actually served the audio; may differ from the track's source. */
+      playbackProvider,
+      /** Last playback failure, or null. Dismissed on retry or a new track. */
+      playbackError,
+      dismissPlaybackError,
+      playTrack,
+      /** Skip to the neighbouring track and play it; false at the queue edge. */
+      next,
+      previous,
+      /** Play one queue row by index. */
+      playQueueIndex,
+      play,
+      pause,
+      seek,
+      changeVolume,
+    }),
+    [
+      currentTrack,
+      isPlaying,
+      isLoading,
+      volume,
+      duration,
+      playbackProvider,
+      playbackError,
+      dismissPlaybackError,
+      playTrack,
+      next,
+      previous,
+      playQueueIndex,
+      play,
+      pause,
+      seek,
+      changeVolume,
+    ]
+  );
+
   return (
-    <PlayerContext.Provider
-      value={{
-        currentTrack,
-        isPlaying,
-        isLoading,
-        volume,
-        position,
-        duration,
-        /** Provider that actually served the audio; may differ from the track's source. */
-        playbackProvider,
-        /** Last playback failure, or null. Dismissed on retry or a new track. */
-        playbackError,
-        dismissPlaybackError,
-        playTrack,
-        /** Skip to the neighbouring track and play it; false at the queue edge. */
-        next,
-        previous,
-        /** Play one queue row by index. */
-        playQueueIndex,
-        play,
-        pause,
-        seek,
-        changeVolume,
-      }}
-    >
-      {children}
-    </PlayerContext.Provider>
+    <PlayerProgressContext.Provider value={position}>
+      <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>
+    </PlayerProgressContext.Provider>
   );
 }
 
@@ -447,3 +494,12 @@ export const usePlayer = () => {
   }
   return context;
 };
+
+/**
+ * The live playback position in seconds, updating ten times a second.
+ *
+ * Separate from `usePlayer` on purpose — subscribing here is what confines the
+ * per-tick re-render to the progress readout. Nothing that only needs to know
+ * *which* track is playing should read this.
+ */
+export const usePlayerProgress = () => useContext(PlayerProgressContext);

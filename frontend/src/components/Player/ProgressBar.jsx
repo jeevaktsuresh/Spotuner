@@ -1,4 +1,6 @@
+import { useCallback } from 'react';
 import { formatTime } from '../../utils/formatTime';
+import { usePlayerProgress } from '../../context/PlayerContext';
 
 /** Keyboard step, in seconds. Large enough to cross a verse, small enough to land on a line. */
 const STEP = 5;
@@ -12,57 +14,67 @@ const STEP = 5;
  *
  * Click to seek, or focus it and use the arrow keys, Home and End — it advertises
  * `role="slider"` and is focusable, so it has to actually respond to a keyboard.
+ *
+ * The position is read from `usePlayerProgress` rather than passed in. It updates
+ * ten times a second, and taking it as a prop put that rate on whoever rendered
+ * this: the PlayerBar and the whole Now Playing queue list. Reading it here
+ * scopes the per-tick re-render to the two scrubbers that actually display it.
  */
 export default function ProgressBar({
-  position,
   duration,
   onSeek,
   /** Set while the track is still resolving, which makes seeking a no-op. */
   disabled = false,
   className = '',
 }) {
-  function handleSeek(e) {
+  const position = usePlayerProgress();
+
+  const handleSeek = useCallback((e) => {
     if (disabled || !duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
     onSeek((x / rect.width) * duration);
-  }
+  }, [disabled, duration, onSeek]);
 
-  function handleKeyDown(e) {
-    if (disabled || !duration) return;
+  // `position` is deliberately not a dependency. It changes ten times a second,
+  // and including it would rebuild this handler on every tick to no purpose.
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (disabled || !duration) return;
 
-    // Which keys act depends only on duration, so the handler stays out of the
-    // dep array and the control is not re-created on every position tick.
-    let target = null;
+      let target = null;
 
-    switch (e.key) {
-      case 'ArrowRight':
-      case 'ArrowUp':
-        target = position + STEP;
-        break;
-      case 'ArrowLeft':
-      case 'ArrowDown':
-        target = position - STEP;
-        break;
-      case 'PageUp':
-        target = position + STEP * 4;
-        break;
-      case 'PageDown':
-        target = position - STEP * 4;
-        break;
-      case 'Home':
-        target = 0;
-        break;
-      case 'End':
-        target = duration;
-        break;
-      default:
-        return;
-    }
+      switch (e.key) {
+        case 'ArrowRight':
+        case 'ArrowUp':
+          target = position + STEP;
+          break;
+        case 'ArrowLeft':
+        case 'ArrowDown':
+          target = position - STEP;
+          break;
+        case 'PageUp':
+          target = position + STEP * 4;
+          break;
+        case 'PageDown':
+          target = position - STEP * 4;
+          break;
+        case 'Home':
+          target = 0;
+          break;
+        case 'End':
+          target = duration;
+          break;
+        default:
+          return;
+      }
 
-    e.preventDefault();
-    onSeek(Math.max(0, Math.min(target, duration)));
-  }
+      e.preventDefault();
+      onSeek(Math.max(0, Math.min(target, duration)));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [disabled, duration, onSeek]
+  );
 
   const progress = duration > 0 ? (position / duration) * 100 : 0;
 

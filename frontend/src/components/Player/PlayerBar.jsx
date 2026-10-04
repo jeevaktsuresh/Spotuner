@@ -46,8 +46,7 @@ export default function PlayerBar({ onOpenQueue }) {
     isPlaying,
     isLoading,
     volume,
-    position,
-    duration,
+      duration,
     playbackProvider,
     playbackError,
     dismissPlaybackError,
@@ -256,8 +255,7 @@ export default function PlayerBar({ onOpenQueue }) {
           {/* Seek */}
           <div className="w-full max-w-[560px]">
             <ProgressBar
-              position={position}
-              duration={duration}
+                  duration={duration}
               onSeek={seek}
               disabled={!currentTrack || isLoading}
             />

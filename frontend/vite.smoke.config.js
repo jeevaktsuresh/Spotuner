@@ -21,6 +21,7 @@ export default defineConfig({
         render: 'scripts/render-smoke.mjs',
         live: 'scripts/live-check.mjs',
         home: 'scripts/check-home.mjs',
+        perf: 'scripts/check-perf.mjs',
       },
     },
   },

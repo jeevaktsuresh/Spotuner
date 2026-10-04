@@ -1,5 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { musicApi } from '../services/api';
+
+/**
+ * Browser copy of the discovery rows, shared across mounts.
+ *
+ * This was a `useRef`, which is per-instance: it served its purpose for one mount
+ * and then vanished, so walking Home -> Browse -> Home issued the request twice.
+ * Keyed by `${scope}:${limit}` exactly as before, so switching scope still cannot
+ * show the previous scope's rows while the new ones load.
+ *
+ * Shared rather than per-instance because the backend already caches these with
+ * tiered TTLs and serves stale-while-revalidate — the client copy saves a round
+ * trip, it does not make the data any fresher than the server would have.
+ */
+const CACHE = new Map();
+
+/** Drop the shared copy so the next mount refetches. */
+export function invalidateDiscovery(cacheKey) {
+  if (cacheKey) CACHE.delete(cacheKey);
+  else CACHE.clear();
+}
 
 /**
  * Loads the discovery rows (trending and latest) for the Home grid.
@@ -25,21 +45,32 @@ export default function useDiscovery({
   limit = 12,
   ttlMs = 5 * 60 * 1000,
 } = {}) {
-  const [data, setData] = useState({ trending: null, latest: null });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
   // Cache key includes scope and limit, so switching scope cannot show the
   // previous scope's rows while the new ones load.
   const cacheKey = `${scope}:${limit}`;
-  const cache = useRef({ key: null, value: null, at: 0 });
+
+  const readCache = () => {
+    const hit = CACHE.get(cacheKey);
+    if (!hit) return null;
+    if (Date.now() - hit.at >= ttlMs) {
+      CACHE.delete(cacheKey);
+      return null;
+    }
+    return hit.value;
+  };
+
+  // Seeded from the shared cache so returning to Home paints its rows on the first
+  // render instead of a skeleton.
+  const [data, setData] = useState(() => readCache() ?? { trending: null, latest: null });
+  const [loading, setLoading] = useState(() => readCache() === null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    const cached = cache.current;
-    if (cached.key === cacheKey && cached.value && Date.now() - cached.at < ttlMs) {
-      setData(cached.value);
+    const cached = readCache();
+    if (cached) {
+      setData(cached);
       setLoading(false);
       return () => {
         cancelled = true;
@@ -57,7 +88,7 @@ export default function useDiscovery({
           latest: result.latest,
         };
 
-        cache.current = { key: cacheKey, value: next, at: Date.now() };
+        CACHE.set(cacheKey, { value: next, at: Date.now() });
         setData(next);
         setError(null);
       } catch (err) {
@@ -74,16 +105,17 @@ export default function useDiscovery({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, limit, cacheKey, ttlMs]);
 
   /** Drop the browser copy so the next mount refetches. */
-  function refresh() {
-    cache.current = { key: null, value: null, at: 0 };
-  }
+  const refresh = useCallback(() => {
+    invalidateDiscovery(cacheKey);
+  }, [cacheKey]);
 
   return {
-    trendingTracks: data.trending?.tracks ?? [],
-    latestTracks: data.latest?.tracks ?? [],
+    trendingTracks: data.trending?.tracks ?? EMPTY,
+    latestTracks: data.latest?.tracks ?? EMPTY,
     trendingMeta: data.trending,
     latestMeta: data.latest,
     loading,
@@ -91,3 +123,9 @@ export default function useDiscovery({
     refresh,
   };
 }
+
+/**
+ * Shared empty array, so a page that renders before discovery lands does not
+ * hand every row a fresh `[]` and re-render itself on each parent render.
+ */
+const EMPTY = [];

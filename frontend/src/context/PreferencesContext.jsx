@@ -1,4 +1,4 @@
-import { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import { createContext, useState, useEffect, useContext, useCallback, useMemo } from 'react';
 
 /**
  * User preferences.
@@ -68,18 +68,20 @@ export function PreferencesProvider({ children }) {
 
   const resetPreferences = useCallback(() => setPreferences(DEFAULTS), []);
 
-  return (
-    <PreferencesContext.Provider
-      value={{
-        ...preferences,
-        setMusicSource,
-        setShowSourceBadge,
-        resetPreferences,
-      }}
-    >
-      {children}
-    </PreferencesContext.Provider>
+  // Memoised like the other providers. Its callbacks are already stable, so
+  // without this the spread still produced a new object on every render and every
+  // preference consumer re-rendered whenever anything above it did.
+  const value = useMemo(
+    () => ({
+      ...preferences,
+      setMusicSource,
+      setShowSourceBadge,
+      resetPreferences,
+    }),
+    [preferences, setMusicSource, setShowSourceBadge, resetPreferences]
   );
+
+  return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
 
 export const usePreferences = () => {

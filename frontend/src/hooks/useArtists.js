@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useShelves from './useShelves';
 import { artistsFromTracks, artistSlug } from '../utils/artists';
 import { musicApi } from '../services/api';
@@ -12,6 +12,23 @@ import { musicApi } from '../services/api';
  * rather than holding the whole grid on the slowest artist.
  */
 const BATCH = 24;
+
+/**
+ * Artist name -> resolved image, shared across every mount of this hook.
+ *
+ * Both of these used to be per-instance: a `useRef` set of attempted names and a
+ * `useState` map of results. That is correct for one mount and wrong for the
+ * second, because unmounting threw both away — so navigating Artists -> an artist
+ * -> back to Artists re-issued an upstream lookup for every name in the rollup,
+ * a few hundred names in batches of 24.
+ *
+ * Moving them to module scope means a remount starts from what is already known
+ * and asks only for names it has never seen. An artist's picture is an immutable
+ * fact, so reusing one cannot serve stale art; failures are cached too, which is
+ * what the old `attempted` set did, just for one mount instead of forever.
+ */
+const IMAGE_CACHE = new Map();
+
 /**
  * Rolls every shelf track up into individual artists.
  *
@@ -23,11 +40,9 @@ const BATCH = 24;
  */
 export default function useArtists(shelvesLimit = 10) {
   const { shelves, loading, error } = useShelves(shelvesLimit);
-  const [resolved, setResolved] = useState({});
-
-  // Names already requested, so revisiting the page (or a re-render) does not
-  // re-ask for pictures that are already in hand or already known to be missing.
-  const attempted = useRef(new Set());
+  // Seeded from the shared cache so a remount paints real art on its first render
+  // instead of placeholders while the batches are re-requested.
+  const [resolved, setResolved] = useState(() => new Map(IMAGE_CACHE));
 
   const tracks = useMemo(() => shelves.flatMap((shelf) => shelf.tracks ?? []), [shelves]);
 
@@ -40,10 +55,14 @@ export default function useArtists(shelvesLimit = 10) {
   //
   // This keys off `isPlaceholder`, not `image`: every artist carries a track
   // cover, so filtering on `image` would skip every lookup and no artist would
-  // ever receive a real picture. `attempted` is read inside the effect, never
+  // ever receive a real picture. `IMAGE_CACHE` is read inside the effect, never
   // during render.
   const wantedKey = useMemo(
-    () => rolled.filter((a) => a.isPlaceholder).map((a) => a.name).join('\n'),
+    () =>
+      rolled
+        .filter((a) => a.isPlaceholder && !IMAGE_CACHE.has(a.name))
+        .map((a) => a.name)
+        .join('\n'),
     [rolled]
   );
 
@@ -56,19 +75,32 @@ export default function useArtists(shelvesLimit = 10) {
     (async () => {
       for (let i = 0; i < names.length; i += BATCH) {
         if (cancelled) return;
-        const slice = names.slice(i, i + BATCH).filter((n) => !attempted.current.has(n));
+        // Skip names another mount resolved while this loop was between batches.
+        const slice = names.slice(i, i + BATCH).filter((n) => !IMAGE_CACHE.has(n));
         if (slice.length === 0) continue;
-        for (const n of slice) attempted.current.add(n);
 
         try {
           const images = await musicApi.getArtistImages(slice);
           if (cancelled) return;
+          for (const [name, url] of Object.entries(images)) {
+            IMAGE_CACHE.set(name, url);
+          }
           // Merge rather than replace: an earlier batch may still be in flight.
-          setResolved((prev) => ({ ...prev, ...images }));
+          setResolved((prev) => {
+            const next = new Map(prev);
+            for (const [name, url] of Object.entries(images)) next.set(name, url);
+            return next;
+          });
         } catch {
           // Leave this batch unresolved; the rollup already carries a track
           // thumbnail as the placeholder, so a failure is not visible as a gap.
-          // Names stay in `attempted` so one outage does not retry in a loop.
+          // Marked as seen so one outage does not retry in a loop.
+          for (const name of slice) IMAGE_CACHE.set(name, null);
+          setResolved((prev) => {
+            const next = new Map(prev);
+            for (const name of slice) if (!next.has(name)) next.set(name, null);
+            return next;
+          });
         }
       }
     })();
@@ -81,9 +113,10 @@ export default function useArtists(shelvesLimit = 10) {
   const artists = useMemo(
     () =>
       rolled.map((artist) => {
-        const real = resolved[artist.name];
+        const real = resolved.get(artist.name);
         // A resolved picture replaces the cover and clears the placeholder flag;
-        // an unresolved one keeps the cover.
+        // an unresolved one (including a cached failure, held as null) keeps the
+        // cover.
         return real ? { ...artist, image: real, isPlaceholder: false } : artist;
       }),
     [rolled, resolved]

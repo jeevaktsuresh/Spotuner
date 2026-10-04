@@ -1,4 +1,4 @@
-import { createContext, useState, useEffect, useRef, useContext, useCallback } from 'react';
+import { createContext, useState, useEffect, useRef, useContext, useCallback, useMemo } from 'react';
 
 export const QueueContext = createContext();
 
@@ -58,13 +58,19 @@ export function QueueProvider({ children }) {
     queueRef.current = queue;
   }, [queue]);
 
-  /** Replace the queue, keeping the synchronous mirror in step. */
-  function commitQueue(next) {
+  /**
+   * Replace the queue, keeping the synchronous mirror in step.
+   *
+   * Exposed as `setQueue` and stable for the lifetime of the provider, because
+   * `PlayerContext` holds it and a fresh identity here would invalidate every
+   * player callback that lists it as a dependency.
+   */
+  const commitQueue = useCallback((next) => {
     const value = typeof next === 'function' ? next(queueRef.current) : next;
     queueRef.current = value;
     setQueue(value);
     return value;
-  }
+  }, []);
 
   /**
    * Where `track` sits in the queue right now, or -1 if it is not queued.
@@ -86,28 +92,28 @@ export function QueueProvider({ children }) {
     []
   );
 
-  function addToQueue(track) {
+  const addToQueue = useCallback((track) => {
     commitQueue((prev) => [...prev, track]);
-  }
+  }, [commitQueue]);
 
-  function playNext(track) {
+  const playNext = useCallback((track) => {
     commitQueue((prev) => [
       ...prev.slice(0, currentIndex + 1),
       track,
       ...prev.slice(currentIndex + 1),
     ]);
-  }
+  }, [commitQueue, currentIndex]);
 
-  function removeFromQueue(index) {
+  const removeFromQueue = useCallback((index) => {
     commitQueue((prev) => prev.filter((_, i) => i !== index));
     if (index < currentIndex) {
       setCurrentIndex(prev => prev - 1);
     }
-  }
+  }, [commitQueue, currentIndex]);
 
-  function playTrackAt(index) {
+  const playTrackAt = useCallback((index) => {
     setCurrentIndex(index);
-  }
+  }, []);
 
   /**
    * Keep the position inside the queue.
@@ -123,19 +129,19 @@ export function QueueProvider({ children }) {
     setCurrentIndex((prev) => (prev >= queue.length ? 0 : prev));
   }, [queue]);
 
-  function next() {
+  const next = useCallback(() => {
     const target = stepIndex(queue, currentIndex, repeat, 1);
     if (target !== NO_INDEX) setCurrentIndex(target);
     return target;
-  }
+  }, [queue, currentIndex, repeat]);
 
-  function previous() {
+  const previous = useCallback(() => {
     const target = stepIndex(queue, currentIndex, repeat, -1);
     if (target !== NO_INDEX) setCurrentIndex(target);
     return target;
-  }
+  }, [queue, currentIndex, repeat]);
 
-  function shuffleQueue() {
+  const shuffleQueue = useCallback(() => {
     if (!shuffle) {
       setOriginalQueue([...queue]);
       const currentTrack = queue[currentIndex];
@@ -164,32 +170,36 @@ export function QueueProvider({ children }) {
       setCurrentIndex(0);
       setShuffle(false);
     }
-  }
+  }, [shuffle, queue, currentIndex, originalQueue, commitQueue]);
 
-  function toggleShuffle() {
+  const toggleShuffle = useCallback(() => {
     shuffleQueue();
-  }
+  }, [shuffleQueue]);
 
-  function cycleRepeat() {
+  const cycleRepeat = useCallback(() => {
     setRepeat(prev => {
       if (prev === 'off') return 'context';
       if (prev === 'context') return 'track';
       return 'off';
     });
-  }
+  }, []);
 
-  function clearQueue() {
+  const clearQueue = useCallback(() => {
     commitQueue([]);
     setCurrentIndex(0);
     setHistory([]);
-  }
+  }, [commitQueue]);
 
-  function addToHistory(track) {
+  const addToHistory = useCallback((track) => {
     setHistory(prev => [...prev, track].slice(-50)); // Keep last 50 tracks
-  }
+  }, []);
 
-  return (
-    <QueueContext.Provider value={{
+  // Memoised so that a queue change re-renders only what reads the queue. The
+  // bare object literal this replaced was a new identity on every render of this
+  // provider, and `PlayerProvider` is one of its consumers — so every queue
+  // mutation re-rendered the player, and through it every page that shows a card.
+  const value = useMemo(
+    () => ({
       queue,
       setQueue: commitQueue,
       currentIndex,
@@ -209,11 +219,31 @@ export function QueueProvider({ children }) {
       toggleShuffle,
       cycleRepeat,
       clearQueue,
-      addToHistory
-    }}>
-      {children}
-    </QueueContext.Provider>
+      addToHistory,
+    }),
+    [
+      queue,
+      commitQueue,
+      currentIndex,
+      seatIndexFor,
+      history,
+      shuffle,
+      repeat,
+      addToQueue,
+      playNext,
+      removeFromQueue,
+      playTrackAt,
+      next,
+      previous,
+      shuffleQueue,
+      toggleShuffle,
+      cycleRepeat,
+      clearQueue,
+      addToHistory,
+    ]
   );
+
+  return <QueueContext.Provider value={value}>{children}</QueueContext.Provider>;
 }
 
 export const useQueue = () => {

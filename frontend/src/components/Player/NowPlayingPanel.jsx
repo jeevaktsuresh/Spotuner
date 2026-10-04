@@ -40,8 +40,7 @@ export default function NowPlayingPanel({ onDismiss }) {
     currentTrack,
     isPlaying,
     isLoading,
-    position,
-    duration,
+      duration,
     playbackProvider,
     playbackError,
     play,
@@ -167,8 +166,7 @@ export default function NowPlayingPanel({ onDismiss }) {
         {/* Seek bar */}
         <div className="mt-4 px-1">
           <ProgressBar
-            position={position}
-            duration={duration}
+                duration={duration}
             onSeek={seek}
             disabled={!currentTrack || isLoading}
           />

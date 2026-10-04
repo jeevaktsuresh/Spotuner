@@ -28,6 +28,7 @@ import TrackCard from '../src/components/Cards/TrackCard.jsx';
 import TrackLockup from '../src/components/Cards/TrackLockup.jsx';
 import TrackRow from '../src/components/Cards/TrackRow.jsx';
 import HeroCarousel from '../src/components/Cards/HeroCarousel.jsx';
+import ProgressBar from '../src/components/Player/ProgressBar.jsx';
 
 const track = {
   id: 'abc123',
@@ -61,6 +62,11 @@ const cases = [
   ['TrackCard', () => h(TrackCard, { track, onPlay: noop })],
   ['TrackLockup', () => h(TrackLockup, { ...track, onPlay: noop })],
   ['TrackRow', () => h(TrackRow, { track, index: 0, onPlay: noop })],
+  // ProgressBar reads the playhead from `usePlayerProgress` rather than taking it
+  // as a prop, so it is the one component that must still render with no provider
+  // above it. The context has a default, so this must not throw.
+  ['ProgressBar (outside any provider)', () => h(ProgressBar, { duration: 214, onSeek: noop })],
+  ['ProgressBar (loading)', () => h(ProgressBar, { duration: 0, onSeek: noop, disabled: true })],
   ['HeroCarousel', () => h(HeroCarousel, { slides: [{ key: 'k1', ...track, isArtworkOnly: true, background: '#111' }], onPlay: noop, onSave: noop })],
   ['HeroCarousel (empty slides)', () => h(HeroCarousel, { slides: [], onPlay: noop, onSave: noop })],
   ['HeroCarousel (gradient only)', () => h(HeroCarousel, { slides: [{ key: 'k2', title: 'T', background: 'linear-gradient(#000,#111)' }], onPlay: noop, onSave: noop })],

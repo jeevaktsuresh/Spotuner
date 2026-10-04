@@ -1,4 +1,4 @@
-import { createContext, useState, useEffect, useContext } from 'react';
+import { createContext, useState, useEffect, useContext, useCallback, useMemo } from 'react';
 
 const LibraryContext = createContext();
 
@@ -76,7 +76,7 @@ export function LibraryProvider({ children }) {
    * directly here would close over a stale render and compute completion rates
    * against outdated counts.
    */
-  function patchHistory(track, patchOrUpdater) {
+  const patchHistory = useCallback((track, patchOrUpdater) => {
     if (!track?.id) return;
 
     const key = `${track.source ?? 'yt'}:${track.id}`;
@@ -116,9 +116,9 @@ export function LibraryProvider({ children }) {
 
       return [record, ...prev].slice(0, HISTORY_LIMIT);
     });
-  }
+  }, []);
 
-  function toggleLike(track) {
+  const toggleLike = useCallback((track) => {
     setLikedSongs(prev => {
       const isLiked = prev.some(t => t.id === track.id && t.source === track.source);
       if (isLiked) {
@@ -137,18 +137,18 @@ export function LibraryProvider({ children }) {
       liked: !currentlyLiked,
       likedAt: currentlyLiked ? null : Date.now(),
     });
-  }
+  }, [likedSongs, patchHistory]);
 
-  function isLiked(trackId) {
+  const isLiked = useCallback((trackId) => {
     // Checked against both fields: `toggleLike` matches on id *and* source, so
     // checking id alone would report a like for a different source's track
     // that happens to share the id.
     return likedSongs.some(
       t => t.id === trackId && (t.source === undefined || t.source === 'youtube'),
     );
-  }
+  }, [likedSongs]);
 
-  function createPlaylist(name, description = '') {
+  const createPlaylist = useCallback((name, description = '') => {
     const newPlaylist = {
       id: Date.now().toString(),
       name,
@@ -159,19 +159,19 @@ export function LibraryProvider({ children }) {
     };
     setPlaylists(prev => [...prev, newPlaylist]);
     return newPlaylist;
-  }
+  }, []);
 
-  function deletePlaylist(playlistId) {
+  const deletePlaylist = useCallback((playlistId) => {
     setPlaylists(prev => prev.filter(p => p.id !== playlistId));
-  }
+  }, []);
 
-  function updatePlaylist(playlistId, updates) {
+  const updatePlaylist = useCallback((playlistId, updates) => {
     setPlaylists(prev => prev.map(p =>
       p.id === playlistId ? { ...p, ...updates } : p
     ));
-  }
+  }, []);
 
-  function addToPlaylist(playlistId, track) {
+  const addToPlaylist = useCallback((playlistId, track) => {
     setPlaylists(prev => prev.map(p => {
       if (p.id === playlistId) {
         const exists = p.tracks.some(t => t.id === track.id && t.source === track.source);
@@ -181,18 +181,18 @@ export function LibraryProvider({ children }) {
       }
       return p;
     }));
-  }
+  }, []);
 
-  function removeFromPlaylist(playlistId, trackId) {
+  const removeFromPlaylist = useCallback((playlistId, trackId) => {
     setPlaylists(prev => prev.map(p => {
       if (p.id === playlistId) {
         return { ...p, tracks: p.tracks.filter(t => t.id !== trackId) };
       }
       return p;
     }));
-  }
+  }, []);
 
-  function addToRecentlyPlayed(track) {
+  const addToRecentlyPlayed = useCallback((track) => {
     setRecentlyPlayed(prev => {
       const filtered = prev.filter(t => !(t.id === track.id && t.source === track.source));
       return [{ ...track, playedAt: Date.now() }, ...filtered].slice(0, 50);
@@ -203,7 +203,7 @@ export function LibraryProvider({ children }) {
       playCount: (existing.playCount ?? 0) + 1,
       lastPlayedAt: Date.now(),
     }));
-  }
+  }, [patchHistory]);
 
   /**
    * Record how far a listener actually got.
@@ -213,7 +213,7 @@ export function LibraryProvider({ children }) {
    * `completed` separates hearing a track through from abandoning it, which the
    * recommender treats very differently.
    */
-  function recordCompletion(track, secondsListened, completed) {
+  const recordCompletion = useCallback((track, secondsListened, completed) => {
     if (!track?.id) return;
 
     patchHistory(track, existing => {
@@ -230,47 +230,66 @@ export function LibraryProvider({ children }) {
         skipCount: (existing.skipCount ?? 0) + (completed ? 0 : 1),
       };
     });
-  }
+  }, [patchHistory]);
 
   /** Mark an intentional replay, which the recommender treats as strong love. */
-  function recordReplay(track) {
+  const recordReplay = useCallback((track) => {
     patchHistory(track, existing => ({
       replayCount: (existing.replayCount ?? 0) + 1,
       playCount: (existing.playCount ?? 0) + 1,
       lastPlayedAt: Date.now(),
     }));
-  }
+  }, [patchHistory]);
 
   /** Record an explicit skip, independent of completion. */
-  function recordSkip(track) {
+  const recordSkip = useCallback((track) => {
     patchHistory(track, existing => ({
       skipCount: (existing.skipCount ?? 0) + 1,
     }));
-  }
+  }, [patchHistory]);
 
-  return (
-    <LibraryContext.Provider
-      value={{
-        likedSongs,
-        playlists,
-        recentlyPlayed,
-        history,
-        toggleLike,
-        isLiked,
-        createPlaylist,
-        deletePlaylist,
-        updatePlaylist,
-        addToPlaylist,
-        removeFromPlaylist,
-        addToRecentlyPlayed,
-        recordCompletion,
-        recordReplay,
-        recordSkip,
-      }}
-    >
-      {children}
-    </LibraryContext.Provider>
+  // Memoised for the same reason as the player and queue values: this provider
+  // wraps the entire app, so a fresh object literal re-rendered the Sidebar and
+  // every library consumer on every library write — and each track played writes
+  // listening history.
+  const value = useMemo(
+    () => ({
+      likedSongs,
+      playlists,
+      recentlyPlayed,
+      history,
+      toggleLike,
+      isLiked,
+      createPlaylist,
+      deletePlaylist,
+      updatePlaylist,
+      addToPlaylist,
+      removeFromPlaylist,
+      addToRecentlyPlayed,
+      recordCompletion,
+      recordReplay,
+      recordSkip,
+    }),
+    [
+      likedSongs,
+      playlists,
+      recentlyPlayed,
+      history,
+      toggleLike,
+      isLiked,
+      createPlaylist,
+      deletePlaylist,
+      updatePlaylist,
+      addToPlaylist,
+      removeFromPlaylist,
+      addToRecentlyPlayed,
+      recordCompletion,
+      recordReplay,
+      recordSkip,
+    ]
   );
+
+  return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;
 }
 
 export const useLibrary = () => {
